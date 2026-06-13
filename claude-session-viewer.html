@@ -1,0 +1,2027 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude Code Session Viewer</title>
+  <script>
+    (() => {
+      try {
+        const saved = localStorage.getItem("claudeSessionViewerTheme");
+        const theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.dataset.theme = theme;
+      } catch {
+        document.documentElement.dataset.theme = "light";
+      }
+    })();
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f5f1;
+      --panel: #ffffff;
+      --panel-soft: #fbfaf7;
+      --ink: #171512;
+      --muted: #6b6258;
+      --line: #ded8cf;
+      --line-strong: #c7beb2;
+      --teal: #0f766e;
+      --teal-soft: #e7f3f1;
+      --amber: #a15c07;
+      --amber-soft: #fff3df;
+      --green: #31733f;
+      --green-soft: #ecf7ee;
+      --red: #a3342a;
+      --red-soft: #fff0ee;
+      --blue: #2563eb;
+      --blue-soft: #e8f1ff;
+      --on-accent: #ffffff;
+      --shadow: 0 1px 2px rgba(23, 21, 18, 0.05), 0 8px 24px rgba(23, 21, 18, 0.06);
+      --mono: "Berkeley Mono", "Berkeley Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: "Berkeley Mono", "Berkeley Mono Variable", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #111315;
+      --panel: #181b1d;
+      --panel-soft: #151719;
+      --ink: #d7d1c7;
+      --muted: #8f887f;
+      --line: #32373a;
+      --line-strong: #4a5155;
+      --teal: #5fd0c5;
+      --teal-soft: #163331;
+      --amber: #f2b45f;
+      --amber-soft: #3a2812;
+      --green: #8fd69b;
+      --green-soft: #17321e;
+      --red: #f19a92;
+      --red-soft: #3a1f1c;
+      --blue: #7cb7ff;
+      --blue-soft: #17273a;
+      --on-accent: #0d1112;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 10px 26px rgba(0, 0, 0, 0.28);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.52;
+      letter-spacing: 0;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+      letter-spacing: 0;
+    }
+
+    button {
+      border: 1px solid var(--line-strong);
+      background: var(--panel);
+      color: var(--ink);
+      border-radius: 6px;
+      padding: 5px 8px;
+      cursor: pointer;
+      font-size: 12px;
+      min-height: 32px;
+      line-height: 1.25;
+    }
+
+    button:hover {
+      border-color: var(--teal);
+      color: var(--teal);
+    }
+
+    button.primary {
+      background: var(--teal);
+      border-color: var(--teal);
+      color: var(--on-accent);
+    }
+
+    button.primary:hover {
+      background: color-mix(in srgb, var(--teal) 82%, #000);
+      color: var(--on-accent);
+    }
+
+    .icon-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+    }
+
+    .icon-button svg {
+      width: 15px;
+      height: 15px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .copy-card-button {
+      width: 28px;
+      height: 28px;
+      flex: 0 0 auto;
+    }
+
+    .copy-card-button svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      align-self: start;
+      height: 100vh;
+      overflow: auto;
+      border-right: 1px solid var(--line);
+      background: var(--panel-soft);
+      padding: 18px 16px;
+    }
+
+    .brand {
+      margin-bottom: 16px;
+    }
+
+    .brand h1 {
+      margin: 0 0 4px;
+      font-size: 18px;
+      line-height: 1.25;
+      font-weight: 750;
+    }
+
+    .source-box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 12px;
+      margin-bottom: 14px;
+      box-shadow: var(--shadow);
+    }
+
+    .source-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .file-input {
+      display: none;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 9px;
+      min-width: 0;
+    }
+
+    .stat b {
+      display: block;
+      font-size: 15px;
+      line-height: 1.1;
+      font-variant-numeric: tabular-nums;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stat span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .outline-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 12px 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .outline-toggle {
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font-size: inherit;
+      text-transform: inherit;
+      cursor: pointer;
+    }
+
+    .outline-toggle:hover {
+      color: var(--teal);
+      border: 0;
+    }
+
+    .turn-list {
+      display: grid;
+      gap: 6px;
+    }
+
+    .turn-button {
+      width: 100%;
+      text-align: left;
+      border: 1px solid transparent;
+      background: transparent;
+      padding: 8px;
+      border-radius: 7px;
+      color: var(--ink);
+    }
+
+    .turn-button:hover {
+      border-color: var(--line-strong);
+      background: var(--panel);
+      color: var(--ink);
+    }
+
+    .turn-summary {
+      display: block;
+      font-size: 13px;
+      line-height: 1.25;
+      max-height: 2.5em;
+      overflow: hidden;
+      font-weight: 400;
+    }
+
+    .turn-button span {
+      display: block;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+      margin-bottom: 3px;
+    }
+
+    .main {
+      min-width: 0;
+    }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--bg) 94%, transparent);
+      backdrop-filter: blur(12px);
+      padding: 14px 20px;
+    }
+
+    .toolbar-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .search-wrap {
+      min-width: 260px;
+      flex: 1;
+      position: relative;
+    }
+
+    .search {
+      width: 100%;
+      height: 32px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      padding: 6px 34px 6px 10px;
+      background: var(--panel);
+      color: var(--ink);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .search::-webkit-search-cancel-button {
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .search-clear {
+      position: absolute;
+      right: 4px;
+      top: 50%;
+      transform: translateY(-50%);
+      display: none;
+      width: 24px;
+      height: 24px;
+      min-height: 24px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 0;
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    .search-wrap.has-value .search-clear {
+      display: inline-flex;
+    }
+
+    .search-clear:hover {
+      background: color-mix(in srgb, var(--line) 55%, transparent);
+      border: 0;
+      color: var(--ink);
+    }
+
+    .filters {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .check {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 999px;
+      padding: 6px 9px;
+      color: var(--muted);
+      font-size: 12px;
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    .check input {
+      margin: 0;
+    }
+
+    .status-line {
+      margin-top: 9px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .content {
+      padding: 20px;
+      width: 100%;
+    }
+
+    .empty {
+      min-height: 360px;
+      display: grid;
+      place-items: center;
+      border: 1px dashed var(--line-strong);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--muted);
+      text-align: center;
+      padding: 32px;
+    }
+
+    .event {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      margin: 0 0 12px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      scroll-margin-top: 118px;
+    }
+
+    .event.user {
+      border-left: 4px solid var(--amber);
+    }
+
+    .event.assistant {
+      border-left: 4px solid var(--teal);
+    }
+
+    .event.tool-call {
+      border-left: 4px solid var(--blue);
+    }
+
+    .event.tool-result {
+      border-left: 4px solid var(--green);
+    }
+
+    .event.system,
+    .event.meta,
+    .event.attachment {
+      border-left: 4px solid var(--line-strong);
+    }
+
+    .event-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-soft);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      border-radius: 999px;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .badge.role-user {
+      background: var(--amber-soft);
+      color: var(--amber);
+      border-color: color-mix(in srgb, var(--amber) 45%, var(--line));
+    }
+
+    .badge.role-assistant {
+      background: var(--teal-soft);
+      color: var(--teal);
+      border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
+    }
+
+    .badge.role-tool {
+      background: var(--blue-soft);
+      color: var(--blue);
+      border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
+    }
+
+    .badge.role-result {
+      background: var(--green-soft);
+      color: var(--green);
+      border-color: color-mix(in srgb, var(--green) 45%, var(--line));
+    }
+
+    .event-time {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+      margin-left: auto;
+    }
+
+    .event-body {
+      padding: 12px 14px 14px;
+    }
+
+    .block {
+      margin: 0 0 10px;
+    }
+
+    .block:last-child {
+      margin-bottom: 0;
+    }
+
+    .md {
+      overflow-wrap: anywhere;
+    }
+
+    .md p,
+    .md .line {
+      margin: 0 0 0.55em;
+      white-space: pre-wrap;
+    }
+
+    .md h1,
+    .md h2,
+    .md h3,
+    .md h4,
+    .md h5,
+    .md h6 {
+      margin: 1.05em 0 0.45em;
+      line-height: 1.25;
+    }
+
+    .md h1 { font-size: 20px; }
+    .md h2 { font-size: 18px; }
+    .md h3 { font-size: 16px; }
+    .md h4,
+    .md h5,
+    .md h6 { font-size: 15px; }
+
+    .md h1:first-child,
+    .md h2:first-child,
+    .md h3:first-child,
+    .md h4:first-child {
+      margin-top: 0;
+    }
+
+    .md .bullet {
+      padding-left: 1.15em;
+      text-indent: -1.15em;
+      margin-bottom: 0.35em;
+      white-space: pre-wrap;
+    }
+
+    .md .quote {
+      border-left: 3px solid var(--line-strong);
+      padding-left: 10px;
+      color: var(--muted);
+      white-space: pre-wrap;
+      margin-bottom: 0.5em;
+    }
+
+    .md hr {
+      border: 0;
+      border-top: 1px solid var(--line);
+      margin: 14px 0;
+    }
+
+    .md .table-wrap {
+      overflow-x: auto;
+      margin: 10px 0;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel);
+    }
+
+    .md table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 560px;
+    }
+
+    .md th,
+    .md td {
+      border-bottom: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+      white-space: normal;
+    }
+
+    .md th:last-child,
+    .md td:last-child {
+      border-right: 0;
+    }
+
+    .md tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .md th {
+      background: color-mix(in srgb, var(--panel-soft) 82%, var(--line));
+      font-weight: 750;
+    }
+
+    .md a {
+      color: var(--teal);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .md a.image-link {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--teal-soft);
+      padding: 2px 6px;
+      text-decoration: none;
+      overflow-wrap: anywhere;
+    }
+
+    .md .task {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 15px;
+      height: 15px;
+      margin-right: 6px;
+      border: 1px solid var(--line-strong);
+      border-radius: 3px;
+      color: var(--teal);
+      font-size: 12px;
+      line-height: 1;
+      vertical-align: -1px;
+    }
+
+    mark.search-hit {
+      background: #ffe08a;
+      color: var(--ink);
+      border-radius: 3px;
+      padding: 0 2px;
+    }
+
+    :root[data-theme="dark"] mark.search-hit {
+      background: #5a3b12;
+      color: #e5d8c7;
+    }
+
+    code,
+    pre {
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0;
+    }
+
+    code {
+      background: color-mix(in srgb, var(--panel-soft) 84%, var(--line));
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 1px 4px;
+    }
+
+    pre {
+      margin: 8px 0 0;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #1f1f1f;
+      color: #d8d2c8;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 520px;
+    }
+
+    pre code {
+      background: transparent;
+      border: 0;
+      color: inherit;
+      font-size: inherit;
+      padding: 0;
+    }
+
+    details {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-soft);
+      padding: 0;
+      overflow: hidden;
+    }
+
+    details + details {
+      margin-top: 8px;
+    }
+
+    summary {
+      cursor: pointer;
+      padding: 9px 10px;
+      color: var(--ink);
+      font-weight: 650;
+      user-select: none;
+    }
+
+    .details-body {
+      border-top: 1px solid var(--line);
+      padding: 10px;
+      background: var(--panel);
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: minmax(90px, 160px) minmax(0, 1fr);
+      gap: 6px 10px;
+      margin: 8px 0;
+      font-size: 13px;
+    }
+
+    .kv dt {
+      color: var(--muted);
+    }
+
+    .kv dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .tool-card {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-soft);
+      padding: 10px;
+    }
+
+    .tool-card .tool-title {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 6px;
+    }
+
+    .tool-card strong {
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+
+    .task-note {
+      border: 1px solid color-mix(in srgb, var(--green) 45%, var(--line));
+      border-radius: 7px;
+      background: var(--green-soft);
+      padding: 10px 12px;
+      color: var(--ink);
+    }
+
+    .task-note strong {
+      display: block;
+      color: var(--green);
+      margin-bottom: 3px;
+      font-size: 13px;
+    }
+
+    .preview {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .bad {
+      color: var(--red);
+    }
+
+    .ok {
+      color: var(--green);
+    }
+
+    .copy-flash {
+      color: var(--green);
+      font-size: 12px;
+      margin-left: 6px;
+    }
+
+    .jump-controls {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .jump-controls .icon-button {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @media (max-width: 900px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        position: relative;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .content,
+      .toolbar {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+
+      .search-wrap {
+        min-width: 100%;
+      }
+
+      .stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <h1>Claude Code Session Viewer</h1>
+      </div>
+
+      <section class="source-box">
+        <div class="source-actions">
+          <button class="primary" id="chooseButton" type="button" title="Claude Code sessions are usually under ~/.claude/projects">Select JSONL</button>
+          <button id="reloadLastButton" type="button">Reload Last</button>
+        </div>
+        <input class="file-input" id="fileInput" type="file" accept=".jsonl,.json,application/json,text/plain">
+      </section>
+
+      <div class="stats" id="stats">
+        <div class="stat"><b>0</b><span>records</span></div>
+        <div class="stat"><b>0</b><span>turns</span></div>
+        <div class="stat"><b>0</b><span>tool calls</span></div>
+        <div class="stat"><b>0</b><span>visible</span></div>
+      </div>
+
+      <div class="outline-title">
+        <button class="outline-toggle" id="turnToggleButton" type="button" aria-expanded="true" title="Toggle turn summaries">Turns ▾</button>
+        <span id="turnCount">0</span>
+      </div>
+      <nav class="turn-list" id="turnList"></nav>
+    </aside>
+
+    <main class="main">
+      <header class="toolbar">
+        <div class="toolbar-row">
+          <div class="search-wrap" id="searchWrap">
+            <input class="search" id="searchInput" type="search" placeholder="Search text, file path, tool name, uuid, line number">
+            <button class="search-clear" id="searchClearButton" type="button" aria-label="Clear search" title="Clear search">&times;</button>
+          </div>
+          <button class="icon-button" id="themeButton" type="button" aria-label="Switch theme" title="Switch theme"></button>
+          <button id="downloadVisibleButton" type="button">Download Visible JSONL</button>
+        </div>
+        <div class="filters">
+          <label class="check"><input id="showUser" type="checkbox" checked> User</label>
+          <label class="check"><input id="showAssistant" type="checkbox" checked> Assistant</label>
+          <label class="check"><input id="showTools" type="checkbox" checked> Tool calls</label>
+          <label class="check"><input id="showResults" type="checkbox" checked> Tool results</label>
+          <label class="check"><input id="showAttachments" type="checkbox"> Attachments</label>
+          <label class="check"><input id="showMeta" type="checkbox"> Metadata</label>
+          <label class="check"><input id="showThinking" type="checkbox"> Thinking</label>
+          <label class="check"><input id="expandOutputs" type="checkbox"> Expand outputs</label>
+        </div>
+        <div class="status-line" id="statusLine">Select a JSONL file from ~/.claude/projects to start.</div>
+      </header>
+
+      <section class="content" id="content">
+        <div class="empty">
+          <div>
+            <strong>No JSONL loaded.</strong>
+            <div>Use Select JSONL to load a Claude Code session from ~/.claude/projects.</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="jump-controls" aria-label="Page navigation">
+    <button class="icon-button" id="jumpTopButton" type="button" aria-label="Jump to top" title="Jump to top">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 15-6-6-6 6"></path></svg>
+    </button>
+    <button class="icon-button" id="jumpBottomButton" type="button" aria-label="Jump to bottom" title="Jump to bottom">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+    </button>
+  </div>
+
+  <script>
+    "use strict";
+
+    const DEFAULT_SESSION_DIR_LABEL = "~/.claude/projects";
+    const DB_NAME = "claude-session-viewer";
+    const DB_STORE = "file-handles";
+    const LAST_HANDLE_KEY = "last-session-jsonl";
+    const META_TYPES = new Set(["mode", "permission-mode", "file-history-snapshot", "queue-operation", "last-prompt", "ai-title"]);
+
+    const state = {
+      sourceName: "",
+      rows: [],
+      events: [],
+      turns: [],
+      visible: [],
+      showTurnSummaries: true
+    };
+
+    const el = {
+      fileInput: document.getElementById("fileInput"),
+      chooseButton: document.getElementById("chooseButton"),
+      reloadLastButton: document.getElementById("reloadLastButton"),
+      searchWrap: document.getElementById("searchWrap"),
+      searchInput: document.getElementById("searchInput"),
+      searchClearButton: document.getElementById("searchClearButton"),
+      themeButton: document.getElementById("themeButton"),
+      downloadVisibleButton: document.getElementById("downloadVisibleButton"),
+      showUser: document.getElementById("showUser"),
+      showAssistant: document.getElementById("showAssistant"),
+      showTools: document.getElementById("showTools"),
+      showResults: document.getElementById("showResults"),
+      showAttachments: document.getElementById("showAttachments"),
+      showMeta: document.getElementById("showMeta"),
+      showThinking: document.getElementById("showThinking"),
+      expandOutputs: document.getElementById("expandOutputs"),
+      content: document.getElementById("content"),
+      stats: document.getElementById("stats"),
+      turnList: document.getElementById("turnList"),
+      turnToggleButton: document.getElementById("turnToggleButton"),
+      turnCount: document.getElementById("turnCount"),
+      statusLine: document.getElementById("statusLine"),
+      jumpTopButton: document.getElementById("jumpTopButton"),
+      jumpBottomButton: document.getElementById("jumpBottomButton")
+    };
+
+    const moonIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 7 7 0 1 0 20.5 14.5Z"></path></svg>';
+    const sunIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>';
+    const clipboardIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function currentTheme() {
+      return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+    }
+
+    function setTheme(theme, persist = true) {
+      const next = theme === "dark" ? "dark" : "light";
+      document.documentElement.dataset.theme = next;
+      if (el.themeButton) {
+        const target = next === "dark" ? "bright" : "dark";
+        el.themeButton.innerHTML = next === "dark" ? sunIcon : moonIcon;
+        el.themeButton.title = "Switch to " + target + " mode";
+        el.themeButton.setAttribute("aria-label", "Switch to " + target + " mode");
+      }
+      if (persist) {
+        try {
+          localStorage.setItem("claudeSessionViewerTheme", next);
+        } catch {
+          // Ignore storage failures when opened under stricter local browser settings.
+        }
+      }
+    }
+
+    function supportsRememberedFile() {
+      return "showOpenFilePicker" in window && "indexedDB" in window;
+    }
+
+    function openHandleDb() {
+      return new Promise((resolve, reject) => {
+        if (!("indexedDB" in window)) {
+          reject(new Error("IndexedDB is not available in this browser context."));
+          return;
+        }
+        const request = indexedDB.open(DB_NAME, 1);
+        request.onupgradeneeded = () => {
+          request.result.createObjectStore(DB_STORE);
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error("Failed to open IndexedDB."));
+      });
+    }
+
+    async function handleDbGet(key) {
+      const db = await openHandleDb();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, "readonly");
+        const request = tx.objectStore(DB_STORE).get(key);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error("Failed to read saved file handle."));
+      });
+    }
+
+    async function handleDbSet(key, value) {
+      const db = await openHandleDb();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, "readwrite");
+        tx.objectStore(DB_STORE).put(value, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error("Failed to save file handle."));
+      });
+    }
+
+    async function loadFileHandle(handle, options = {}) {
+      const requestPermission = Boolean(options.requestPermission);
+      let permission = "prompt";
+      if (handle.queryPermission) {
+        permission = await handle.queryPermission({ mode: "read" });
+      }
+      if (permission !== "granted" && requestPermission && handle.requestPermission) {
+        permission = await handle.requestPermission({ mode: "read" });
+      }
+      if (permission !== "granted") {
+        el.statusLine.textContent = "Remembered file exists, but the browser needs permission again. Click Reload Last.";
+        return false;
+      }
+
+      const file = await handle.getFile();
+      await loadFile(file);
+      return true;
+    }
+
+    async function chooseFileWithHandle() {
+      if (!supportsRememberedFile()) {
+        el.fileInput.click();
+        return;
+      }
+
+      try {
+        const [handle] = await window.showOpenFilePicker({
+          id: "claude-code-session-jsonl",
+          multiple: false,
+          types: [{
+            description: "Claude JSONL session",
+            accept: {
+              "application/x-ndjson": [".jsonl"],
+              "application/json": [".json"],
+              "text/plain": [".jsonl", ".txt"]
+            }
+          }]
+        });
+        await handleDbSet(LAST_HANDLE_KEY, handle);
+        await loadFileHandle(handle, { requestPermission: true });
+      } catch (error) {
+        if (error && error.name === "AbortError") return;
+        el.statusLine.textContent = "File picker failed: " + error.message + ". Falling back to standard picker.";
+        el.fileInput.click();
+      }
+    }
+
+    async function reloadLastFile(requestPermission = true) {
+      if (!supportsRememberedFile()) {
+        el.statusLine.textContent = "This browser cannot remember local file handles. Use Select JSONL and choose a file under " + DEFAULT_SESSION_DIR_LABEL + ".";
+        return false;
+      }
+      const handle = await handleDbGet(LAST_HANDLE_KEY);
+      if (!handle) {
+        el.statusLine.textContent = "No remembered session yet. Use Select JSONL once from " + DEFAULT_SESSION_DIR_LABEL + ".";
+        return false;
+      }
+      return loadFileHandle(handle, { requestPermission });
+    }
+
+    async function tryAutoReloadLastFile() {
+      if (!supportsRememberedFile()) return;
+      const handle = await handleDbGet(LAST_HANDLE_KEY);
+      if (!handle) return;
+      await loadFileHandle(handle, { requestPermission: false });
+    }
+
+    function shortId(value) {
+      if (!value) return "";
+      const text = String(value);
+      return text.length > 12 ? text.slice(0, 8) + ".." + text.slice(-4) : text;
+    }
+
+    function formatTime(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString(undefined, {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+    }
+
+    function bytes(value) {
+      const n = Number(value) || 0;
+      if (n < 1024) return n + " B";
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+      return (n / 1024 / 1024).toFixed(1) + " MB";
+    }
+
+    function summarize(value, max = 140) {
+      const text = String(value ?? "")
+        .replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g, "local command caveat")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!text) return "(empty)";
+      return text.length > max ? text.slice(0, max - 1) + "..." : text;
+    }
+
+    function safeHref(url) {
+      const value = String(url || "").trim();
+      if (/^(https?:|mailto:)/i.test(value)) return value;
+      if (/^\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]*$/.test(value)) return value;
+      return "";
+    }
+
+    function renderInlineNoCode(value) {
+      let text = escapeHtml(value);
+      text = text.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, (_, alt, url) => {
+        const href = safeHref(url);
+        const label = alt ? "Image: " + alt : "Image";
+        if (!href) return '<span class="image-link">' + escapeHtml(label) + "</span>";
+        return '<a class="image-link" href="' + escapeHtml(href) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(label) + "</a>";
+      });
+      text = text.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, (_, label, url) => {
+        const href = safeHref(url);
+        if (!href) return escapeHtml(label) + " (" + escapeHtml(url) + ")";
+        return '<a href="' + escapeHtml(href) + '" target="_blank" rel="noopener noreferrer">' + label + "</a>";
+      });
+      text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+      return text;
+    }
+
+    function inlineMd(value) {
+      return String(value ?? "").split(/(`[^`]*`)/g).map((part) => {
+        if (part.startsWith("`") && part.endsWith("`") && part.length >= 2) {
+          return "<code>" + escapeHtml(part.slice(1, -1)) + "</code>";
+        }
+        return renderInlineNoCode(part);
+      }).join("");
+    }
+
+    function isTableRow(line) {
+      const trimmed = line.trim();
+      return trimmed.includes("|") && trimmed.split("|").length >= 3;
+    }
+
+    function isTableSeparator(line) {
+      if (!isTableRow(line)) return false;
+      const cells = splitTableRow(line);
+      return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
+    }
+
+    function splitTableRow(line) {
+      const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+      const cells = [];
+      let current = "";
+      let escaped = false;
+      for (const char of trimmed) {
+        if (escaped) {
+          current += char;
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === "|") {
+          cells.push(current.trim());
+          current = "";
+        } else {
+          current += char;
+        }
+      }
+      cells.push(current.trim());
+      return cells;
+    }
+
+    function renderTable(headerLine, bodyLines) {
+      const headers = splitTableRow(headerLine);
+      const rows = bodyLines.map(splitTableRow);
+      const head = headers.map((cell) => "<th>" + inlineMd(cell) + "</th>").join("");
+      const body = rows.map((row) => {
+        const cells = headers.map((_, index) => "<td>" + inlineMd(row[index] || "") + "</td>").join("");
+        return "<tr>" + cells + "</tr>";
+      }).join("");
+      return '<div class="table-wrap"><table><thead><tr>' + head + "</tr></thead><tbody>" + body + "</tbody></table></div>";
+    }
+
+    function formatMarkdown(text) {
+      const lines = String(text ?? "").split(/\r?\n/);
+      let html = "";
+      let inCode = false;
+      let code = [];
+      let codeLang = "";
+
+      function flushCode() {
+        html += "<pre><code>" + escapeHtml(code.join("\n")) + "</code></pre>";
+        code = [];
+        codeLang = "";
+      }
+
+      for (let index = 0; index < lines.length; index++) {
+        const line = lines[index];
+        if (line.startsWith("```")) {
+          if (inCode) {
+            flushCode();
+            inCode = false;
+          } else {
+            inCode = true;
+            codeLang = line.slice(3).trim();
+          }
+          continue;
+        }
+
+        if (inCode) {
+          code.push(line);
+          continue;
+        }
+
+        if (index + 1 < lines.length && isTableRow(line) && isTableSeparator(lines[index + 1])) {
+          const bodyLines = [];
+          index += 2;
+          while (index < lines.length && isTableRow(lines[index]) && lines[index].trim()) {
+            bodyLines.push(lines[index]);
+            index += 1;
+          }
+          index -= 1;
+          html += renderTable(line, bodyLines);
+          continue;
+        }
+
+        const trimmed = line.trim();
+        if (!trimmed) {
+          html += '<div class="line"></div>';
+          continue;
+        }
+
+        const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+        if (heading) {
+          const level = Math.min(6, heading[1].length);
+          html += "<h" + level + ">" + inlineMd(heading[2]) + "</h" + level + ">";
+          continue;
+        }
+
+        if (/^---+$/.test(trimmed)) {
+          html += "<hr>";
+          continue;
+        }
+
+        const task = /^\s*[-*]\s+\[([ xX])\]\s+(.+)$/.exec(line);
+        if (task) {
+          const mark = task[1].toLowerCase() === "x" ? "✓" : "";
+          html += '<div class="bullet"><span class="task">' + mark + '</span>' + inlineMd(task[2]) + "</div>";
+          continue;
+        }
+
+        if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
+          html += '<div class="bullet">' + inlineMd(line.trim()) + "</div>";
+          continue;
+        }
+
+        if (/^\s*>/.test(line)) {
+          html += '<div class="quote">' + inlineMd(line.replace(/^\s*>\s?/, "")) + "</div>";
+          continue;
+        }
+
+        html += '<p>' + inlineMd(line) + "</p>";
+      }
+
+      if (inCode) flushCode();
+      return '<div class="md">' + html + "</div>";
+    }
+
+    function collectStrings(value, out = []) {
+      if (value == null) return out;
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        out.push(String(value));
+        return out;
+      }
+      if (Array.isArray(value)) {
+        for (const item of value) collectStrings(item, out);
+        return out;
+      }
+      if (typeof value === "object") {
+        for (const [key, item] of Object.entries(value)) {
+          out.push(key);
+          collectStrings(item, out);
+        }
+      }
+      return out;
+    }
+
+    function contentBlocks(record) {
+      const content = record.message && record.message.content;
+      if (Array.isArray(content)) return content;
+      if (typeof content === "string") return [{ type: "text", text: content }];
+      return [];
+    }
+
+    function isToolResultRecord(record) {
+      if (record.type !== "user") return false;
+      const content = record.message && record.message.content;
+      return Array.isArray(content) && content.some((item) => item && item.type === "tool_result");
+    }
+
+    function isTaskNotificationText(content) {
+      return typeof content === "string" && content.trim().startsWith("<task-notification>");
+    }
+
+    function isCommandArtifact(record) {
+      if (record.type !== "user") return false;
+      const content = record.message && record.message.content;
+      if (typeof content !== "string") return false;
+      const trimmed = content.trim();
+      return trimmed.startsWith("<command-name>")
+        || trimmed.startsWith("<local-command-")
+        || trimmed.startsWith("<local-command-caveat>");
+    }
+
+    function isThinkingOnly(record) {
+      if (record.type !== "assistant") return false;
+      const blocks = contentBlocks(record);
+      return blocks.length > 0 && blocks.every((item) => item && item.type === "thinking");
+    }
+
+    function isToolCallRecord(record) {
+      if (record.type !== "assistant") return false;
+      return contentBlocks(record).some((item) => item && item.type === "tool_use");
+    }
+
+    function roleKind(record) {
+      if (record.type === "assistant" && isToolCallRecord(record)) return "tool-call";
+      if (isToolResultRecord(record)) return "tool-result";
+      if (record.type === "attachment") return "attachment";
+      if (record.type === "system") return "system";
+      if (record.type === "user") return "user";
+      if (record.type === "assistant") return "assistant";
+      return "meta";
+    }
+
+    function isMetaRecord(record) {
+      if (META_TYPES.has(record.type)) return true;
+      if (record.isMeta) return true;
+      if (isCommandArtifact(record)) return true;
+      if (record.type === "system" && record.subtype !== "away_summary") return true;
+      return false;
+    }
+
+    function isMajorUserPrompt(record) {
+      if (record.type !== "user" || isToolResultRecord(record) || record.isMeta) return false;
+      const content = record.message && record.message.content;
+      if (typeof content !== "string") return false;
+      const trimmed = content.trim();
+      if (!trimmed) return false;
+      if (trimmed.startsWith("<local-command-")) return false;
+      if (trimmed.startsWith("<command-name>")) return false;
+      if (isTaskNotificationText(trimmed)) return false;
+      if (record.promptSource === "typed") return true;
+      return trimmed.length > 80;
+    }
+
+    function normalizeRecord(record, lineNumber, raw) {
+      const kind = roleKind(record);
+      const blocks = contentBlocks(record);
+      const types = blocks.map((item) => item && item.type).filter(Boolean);
+      const strings = collectStrings(record, []);
+      strings.push("line:" + lineNumber);
+      return {
+        raw,
+        record,
+        lineNumber,
+        kind,
+        blockTypes: types,
+        isMeta: isMetaRecord(record),
+        isThinkingOnly: isThinkingOnly(record),
+        majorPrompt: isMajorUserPrompt(record),
+        searchText: strings.join("\n").toLowerCase(),
+        turnId: 0
+      };
+    }
+
+    function parseJsonl(text) {
+      const lines = text.split(/\r?\n/);
+      const rows = [];
+      const errors = [];
+      for (let index = 0; index < lines.length; index++) {
+        const raw = lines[index];
+        if (!raw.trim()) continue;
+        try {
+          const record = JSON.parse(raw);
+          rows.push(normalizeRecord(record, index + 1, raw));
+        } catch (error) {
+          errors.push({ line: index + 1, message: error.message, raw });
+        }
+      }
+      if (errors.length) {
+        console.warn("JSONL parse errors", errors);
+      }
+      return { rows, errors };
+    }
+
+    function buildTurns(rows) {
+      const turns = [];
+      let current = null;
+
+      for (const event of rows) {
+        if (event.majorPrompt) {
+          current = {
+            id: turns.length + 1,
+            lineNumber: event.lineNumber,
+            timestamp: event.record.timestamp || "",
+            title: summarize(event.record.message.content, 130),
+            count: 0
+          };
+          turns.push(current);
+        }
+
+        if (!current) {
+          event.turnId = 0;
+        } else {
+          event.turnId = current.id;
+          current.count += 1;
+        }
+      }
+
+      return turns;
+    }
+
+    function toolMap(rows) {
+      const map = new Map();
+      for (const event of rows) {
+        if (event.record.type !== "assistant") continue;
+        for (const block of contentBlocks(event.record)) {
+          if (block && block.type === "tool_use" && block.id) {
+            map.set(block.id, {
+              name: block.name || "tool",
+              lineNumber: event.lineNumber,
+              input: block.input || {}
+            });
+          }
+        }
+      }
+      return map;
+    }
+
+    function loadText(text, name) {
+      const parsed = parseJsonl(text);
+      state.rows = parsed.rows;
+      state.events = parsed.rows;
+      state.turns = buildTurns(state.events);
+      state.sourceName = name || "session.jsonl";
+      state.toolUses = toolMap(state.events);
+      renderAll();
+
+      const firstTitle = state.events.find((event) => event.record.type === "ai-title" && event.record.aiTitle);
+      const title = firstTitle ? firstTitle.record.aiTitle : state.sourceName;
+      el.statusLine.textContent = parsed.errors.length
+        ? "Loaded with " + parsed.errors.length + " parse errors. Valid records are shown."
+        : "Loaded " + state.events.length + " records from " + state.sourceName + ".";
+    }
+
+    async function loadFile(file) {
+      if (!file) return;
+      el.statusLine.textContent = "Reading " + file.name + " (" + bytes(file.size) + ")...";
+      const text = await file.text();
+      loadText(text, file.name);
+    }
+
+    function filters() {
+      return {
+        q: el.searchInput.value.trim().toLowerCase(),
+        showUser: el.showUser.checked,
+        showAssistant: el.showAssistant.checked,
+        showTools: el.showTools.checked,
+        showResults: el.showResults.checked,
+        showAttachments: el.showAttachments.checked,
+        showMeta: el.showMeta.checked,
+        showThinking: el.showThinking.checked,
+        expandOutputs: el.expandOutputs.checked
+      };
+    }
+
+    function searchTerms(query) {
+      return String(query || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+    }
+
+    function escapeRegExp(value) {
+      return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function updateSearchClear() {
+      el.searchWrap.classList.toggle("has-value", Boolean(el.searchInput.value));
+    }
+
+    function applyHighlights(root, query) {
+      const terms = searchTerms(query).sort((a, b) => b.length - a.length);
+      if (!terms.length) return;
+
+      const pattern = terms.map(escapeRegExp).join("|");
+      const regex = new RegExp("(" + pattern + ")", "gi");
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+          const parent = node.parentElement;
+          if (!parent || parent.closest("button, script, style, mark")) return NodeFilter.FILTER_REJECT;
+          regex.lastIndex = 0;
+          return regex.test(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+        }
+      });
+
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+
+      for (const node of nodes) {
+        regex.lastIndex = 0;
+        const text = node.nodeValue;
+        const fragment = document.createDocumentFragment();
+        let lastIndex = 0;
+        text.replace(regex, (match, _group, offset) => {
+          if (offset > lastIndex) {
+            fragment.appendChild(document.createTextNode(text.slice(lastIndex, offset)));
+          }
+          const mark = document.createElement("mark");
+          mark.className = "search-hit";
+          mark.textContent = match;
+          fragment.appendChild(mark);
+          lastIndex = offset + match.length;
+          return match;
+        });
+        if (lastIndex < text.length) {
+          fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+        }
+        node.parentnode.replaceChild(fragment, node);
+      }
+    }
+
+    function matchesFilters(event, f) {
+      if (event.isMeta && !f.showMeta) return false;
+      if (event.kind === "attachment" && !f.showAttachments) return false;
+      if (event.kind === "user" && !f.showUser) return false;
+      if (event.kind === "assistant" && !f.showAssistant) return false;
+      if (event.kind === "tool-call" && !f.showTools) return false;
+      if (event.kind === "tool-result" && !f.showResults) return false;
+      if (event.isThinkingOnly && !f.showThinking) return false;
+
+      if (!f.q) return true;
+      const terms = searchTerms(f.q);
+      return terms.every((term) => event.searchText.includes(term));
+    }
+
+    function roleBadge(event) {
+      if (event.kind === "user") return '<span class="badge role-user">user</span>';
+      if (event.kind === "assistant") return '<span class="badge role-assistant">assistant</span>';
+      if (event.kind === "tool-call") return '<span class="badge role-tool">tool call</span>';
+      if (event.kind === "tool-result") return '<span class="badge role-result">tool result</span>';
+      if (event.kind === "attachment") return '<span class="badge">attachment</span>';
+      if (event.kind === "system") return '<span class="badge">system</span>';
+      return '<span class="badge">meta</span>';
+    }
+
+    function eventHeader(event) {
+      const record = event.record;
+      const bits = [
+        roleBadge(event),
+        '<span class="badge">line ' + event.lineNumber + "</span>",
+        '<span class="badge">' + escapeHtml(record.type || "unknown") + "</span>"
+      ];
+      if (record.subtype) bits.push('<span class="badge">' + escapeHtml(record.subtype) + "</span>");
+      if (record.uuid) bits.push('<span class="badge">uuid ' + escapeHtml(shortId(record.uuid)) + "</span>");
+      if (record.promptId) bits.push('<span class="badge">prompt ' + escapeHtml(shortId(record.promptId)) + "</span>");
+      if (event.turnId) bits.push('<span class="badge">turn ' + event.turnId + "</span>");
+      const time = formatTime(record.timestamp);
+      const copyButton = '<button class="icon-button copy-card-button" type="button" data-copy-line="' + event.lineNumber + '" aria-label="Copy card content" title="Copy card content">' + clipboardIcon + "</button>";
+      return '<div class="event-head">' + bits.join("") + '<span class="event-time">' + escapeHtml(time) + "</span>" + copyButton + "</div>";
+    }
+
+    function prettyJson(value) {
+      try {
+        return JSON.stringify(value, null, 2);
+      } catch {
+        return String(value);
+      }
+    }
+
+    function inputSummary(name, input) {
+      if (!input || typeof input !== "object") return "";
+      if (name === "Bash") return input.description || input.command || "";
+      if (name === "Read") {
+        const parts = [input.file_path || ""];
+        if (input.offset != null) parts.push("offset " + input.offset);
+        if (input.limit != null) parts.push("limit " + input.limit);
+        return parts.filter(Boolean).join(" | ");
+      }
+      if (name === "Edit" || name === "MultiEdit" || name === "Write") return input.file_path || "";
+      if (name === "Grep") return [input.pattern, input.path].filter(Boolean).join(" in ");
+      if (name === "Glob") return [input.pattern, input.path].filter(Boolean).join(" in ");
+      if (name === "WebSearch") return input.query || "";
+      if (name === "WebFetch") return input.url || "";
+      const pairs = Object.entries(input).slice(0, 3).map(([key, value]) => key + "=" + summarize(value, 60));
+      return pairs.join(" | ");
+    }
+
+    function renderToolUse(block) {
+      const name = block.name || "tool";
+      const summary = inputSummary(name, block.input || {});
+      const json = prettyJson(block.input || {});
+      return [
+        '<div class="tool-card block">',
+        '<div class="tool-title">',
+        '<span class="badge role-tool">tool_use</span>',
+        '<strong>' + escapeHtml(name) + "</strong>",
+        block.id ? '<span class="badge">' + escapeHtml(shortId(block.id)) + "</span>" : "",
+        "</div>",
+        summary ? '<div class="preview">' + escapeHtml(summary) + "</div>" : "",
+        "<details>",
+        "<summary>Input</summary>",
+        '<div class="details-body"><pre><code>' + escapeHtml(json) + "</code></pre></div>",
+        "</details>",
+        "</div>"
+      ].join("");
+    }
+
+    function renderToolResult(block, expand) {
+      const tool = state.toolUses && block.tool_use_id ? state.toolUses.get(block.tool_use_id) : null;
+      const label = tool ? tool.name : "tool_result";
+      const isError = block.is_error || block.error || false;
+      let content = block.content;
+      if (Array.isArray(content)) content = prettyJson(content);
+      if (content == null) content = "";
+      if (typeof content !== "string") content = prettyJson(content);
+      const preview = summarize(content, 240);
+      const openAttr = expand || content.length < 900 ? " open" : "";
+      return [
+        '<details class="block tool-output"' + openAttr + ">",
+        "<summary>",
+        '<span class="' + (isError ? "bad" : "ok") + '">' + escapeHtml(label) + "</span>",
+        block.tool_use_id ? ' <span class="badge">' + escapeHtml(shortId(block.tool_use_id)) + "</span>" : "",
+        "</summary>",
+        '<div class="details-body">',
+        '<div class="preview">' + escapeHtml(preview) + "</div>",
+        '<pre><code>' + escapeHtml(content) + "</code></pre>",
+        "</div>",
+        "</details>"
+      ].join("");
+    }
+
+    function extractTagText(content, tag) {
+      const match = new RegExp("<" + tag + ">([\\s\\S]*?)</" + tag + ">").exec(content || "");
+      return match ? match[1].trim() : "";
+    }
+
+    function renderTaskNotification(content) {
+      const summary = extractTagText(content, "summary") || "Background command completed.";
+      return [
+        '<div class="task-note block">',
+        "<strong>Background Task</strong>",
+        '<div class="md"><p>' + inlineMd(summary) + "</p></div>",
+        "</div>"
+      ].join("");
+    }
+
+    function renderAssistant(event, f) {
+      const blocks = contentBlocks(event.record);
+      if (!blocks.length) return renderJsonDetails(event.record.message || event.record, "Message");
+
+      return blocks.map((block) => {
+        if (!block || typeof block !== "object") return "";
+        if (block.type === "text") return '<div class="block">' + formatMarkdown(block.text || "") + "</div>";
+        if (block.type === "tool_use") return renderToolUse(block);
+        if (block.type === "thinking") {
+          if (!f.showThinking) return "";
+          const thinking = block.thinking || block.text || "";
+          const signature = block.signature || "";
+          if (thinking.trim()) {
+            return '<details class="block" open><summary>Thinking</summary><div class="details-body">' + formatMarkdown(thinking) + "</div></details>";
+          }
+          const note = signature
+            ? "No readable thinking text is stored in this transcript block. Claude Code recorded only an opaque signature (" + signature.length.toLocaleString() + " chars)."
+            : "No readable thinking text is stored in this transcript block.";
+          return '<details class="block" open><summary>Thinking unavailable</summary><div class="details-body"><div class="preview">' + escapeHtml(note) + "</div></div></details>";
+        }
+        return renderJsonDetails(block, "Block: " + (block.type || "unknown"));
+      }).join("");
+    }
+
+    function renderUser(event, f) {
+      const record = event.record;
+      const content = record.message && record.message.content;
+      if (Array.isArray(content)) {
+        return content.map((block) => {
+          if (block && block.type === "tool_result") return renderToolResult(block, f.expandOutputs);
+          if (block && block.type === "text") return '<div class="block">' + formatMarkdown(block.text || "") + "</div>";
+          return renderJsonDetails(block, "User block");
+        }).join("");
+      }
+      if (isTaskNotificationText(content)) return renderTaskNotification(content);
+      if (typeof content === "string") return '<div class="block">' + formatMarkdown(content) + "</div>";
+      return renderJsonDetails(record.message || record, "User message");
+    }
+
+    function renderAttachment(record, f) {
+      const attachment = record.attachment || {};
+      const type = attachment.type || record.type || "attachment";
+      let body = "";
+      if (attachment.content && typeof attachment.content === "string") {
+        body = formatMarkdown(attachment.content);
+      } else if (attachment.addedNames || attachment.removedNames) {
+        const added = (attachment.addedNames || []).join(", ");
+        const removed = (attachment.removedNames || []).join(", ");
+        body = '<dl class="kv"><dt>added</dt><dd>' + escapeHtml(added || "-") + "</dd><dt>removed</dt><dd>" + escapeHtml(removed || "-") + "</dd></dl>";
+      } else {
+        body = '<pre><code>' + escapeHtml(prettyJson(attachment)) + "</code></pre>";
+      }
+      const openAttr = f.expandOutputs ? " open" : "";
+      return '<details class="block"' + openAttr + '><summary>' + escapeHtml(type) + '</summary><div class="details-body">' + body + "</div></details>";
+    }
+
+    function renderSystem(record) {
+      if (record.content) return '<div class="block">' + formatMarkdown(record.content) + "</div>";
+      return renderJsonDetails(record, "System record");
+    }
+
+    function renderJsonDetails(value, label) {
+      return [
+        '<details class="block">',
+        "<summary>" + escapeHtml(label) + "</summary>",
+        '<div class="details-body"><pre><code>' + escapeHtml(prettyJson(value)) + "</code></pre></div>",
+        "</details>"
+      ].join("");
+    }
+
+    function renderEvent(event, f) {
+      const record = event.record;
+      let body = "";
+      if (record.type === "assistant") body = renderAssistant(event, f);
+      else if (record.type === "user") body = renderUser(event, f);
+      else if (record.type === "attachment") body = renderAttachment(record, f);
+      else if (record.type === "system") body = renderSystem(record);
+      else if (record.type === "ai-title") body = '<div class="block">' + formatMarkdown(record.aiTitle || "") + "</div>";
+      else body = renderJsonDetails(record, "Raw record");
+
+      if (!body.trim()) body = '<div class="preview">(hidden by current block settings)</div>';
+
+      const classes = ["event", event.kind];
+      if (event.isMeta) classes.push("meta");
+      return '<article class="' + classes.join(" ") + '" id="line-' + event.lineNumber + '">' + eventHeader(event) + '<div class="event-body">' + body + "</div></article>";
+    }
+
+    function statCard(value, label, title) {
+      const text = typeof value === "number" ? value.toLocaleString() : String(value);
+      const fullTitle = title || (label + ": " + text);
+      return '<div class="stat" title="' + escapeHtml(fullTitle) + '"><b>' + escapeHtml(text) + '</b><span>' + escapeHtml(label) + '</span></div>';
+    }
+
+    function renderStats(visibleCount) {
+      const counts = new Map();
+      let toolCalls = 0;
+      let toolResults = 0;
+      const seenUsage = new Set();
+      let usageCalls = 0;
+      let rawInputTokens = 0;
+      let cacheCreationTokens = 0;
+      let cacheReadTokens = 0;
+      let outputTokens = 0;
+
+      for (const event of state.events) {
+        counts.set(event.record.type, (counts.get(event.record.type) || 0) + 1);
+        if (event.kind === "tool-call") toolCalls += contentBlocks(event.record).filter((block) => block && block.type === "tool_use").length;
+        if (event.kind === "tool-result") {
+          const content = event.record.message && event.record.message.content;
+          toolResults += Array.isArray(content) ? content.filter((block) => block && block.type === "tool_result").length : 0;
+        }
+        const usage = event.record.message && event.record.message.usage;
+        if (usage) {
+          const usageKey = event.record.requestId || event.record.uuid || ("line:" + event.lineNumber);
+          if (seenUsage.has(usageKey)) continue;
+          seenUsage.add(usageKey);
+          usageCalls += 1;
+          rawInputTokens += Number(usage.input_tokens || 0);
+          cacheCreationTokens += Number(usage.cache_creation_input_tokens || 0);
+          cacheReadTokens += Number(usage.cache_read_input_tokens || 0);
+          outputTokens += Number(usage.output_tokens || 0);
+        }
+      }
+
+      const totalInputTokens = rawInputTokens + cacheCreationTokens + cacheReadTokens;
+      el.stats.innerHTML = [
+        statCard(state.events.length, "records"),
+        statCard(state.turns.length, "turns"),
+        statCard(toolCalls, "tool calls"),
+        statCard(visibleCount, "visible"),
+        statCard(usageCalls, "usage calls", "Unique assistant requestId values with message.usage"),
+        statCard(totalInputTokens, "input+cache", "input_tokens + cache_creation_input_tokens + cache_read_input_tokens, de-duplicated by requestId"),
+        statCard(outputTokens, "output tokens", "output_tokens, de-duplicated by requestId"),
+        statCard(cacheReadTokens, "cache read", "cache_read_input_tokens, de-duplicated by requestId"),
+        statCard(cacheCreationTokens, "cache create", "cache_creation_input_tokens, de-duplicated by requestId"),
+        statCard(rawInputTokens, "raw input", "input_tokens only, de-duplicated by requestId")
+      ].join("");
+
+      const titleBits = [];
+      if (state.sourceName) titleBits.push(state.sourceName);
+      if (toolResults) titleBits.push(toolResults.toLocaleString() + " tool results");
+      if (counts.size) titleBits.push([...counts.entries()].map(([key, value]) => key + ":" + value).join(" "));
+      if (titleBits.length) el.statusLine.textContent = titleBits.join(" | ");
+    }
+
+    function renderOutline() {
+      el.turnCount.textContent = String(state.turns.length);
+      el.turnToggleButton.textContent = state.showTurnSummaries ? "Turns ▾" : "Turns ▸";
+      el.turnToggleButton.setAttribute("aria-expanded", state.showTurnSummaries ? "true" : "false");
+      if (!state.turns.length) {
+        el.turnList.innerHTML = "";
+        return;
+      }
+      el.turnList.innerHTML = state.turns.map((turn) => {
+        const time = turn.timestamp ? formatTime(turn.timestamp) : "line " + turn.lineNumber;
+        const summary = state.showTurnSummaries ? '<div class="turn-summary">' + escapeHtml(turn.title) + "</div>" : "";
+        return [
+          '<button class="turn-button" type="button" data-line="' + turn.lineNumber + '">',
+          "<span>#" + turn.id + " | " + escapeHtml(time) + " | " + turn.count + " records</span>",
+          summary,
+          "</button>"
+        ].join("");
+      }).join("");
+    }
+
+    function renderAll() {
+      const f = filters();
+      const visible = state.events.filter((event) => matchesFilters(event, f));
+      state.visible = visible;
+
+      if (!state.events.length) {
+        el.content.innerHTML = '<div class="empty"><div><strong>No JSONL loaded.</strong><div>Use Select JSONL to load a Claude Code session from ' + escapeHtml(DEFAULT_SESSION_DIR_LABEL) + '.</div></div></div>';
+      } else if (!visible.length) {
+        el.content.innerHTML = '<div class="empty"><div><strong>No matching records.</strong><div>Adjust search or filters.</div></div></div>';
+      } else {
+        el.content.innerHTML = visible.map((event) => renderEvent(event, f)).join("");
+        applyHighlights(el.content, f.q);
+      }
+
+      renderStats(visible.length);
+      renderOutline();
+    }
+
+    function blockContentText(block) {
+      if (!block) return "";
+      if (typeof block === "string") return block;
+      if (block.type === "text") return block.text || "";
+      if (block.type === "tool_use") return "TOOL " + (block.name || "") + "\n" + prettyJson(block.input || {});
+      if (block.type === "tool_result") {
+        const content = block.content;
+        if (content == null) return "";
+        return typeof content === "string" ? content : prettyJson(content);
+      }
+      if (block.type === "thinking") return block.thinking || block.text || "";
+      return prettyJson(block);
+    }
+
+    function eventContentText(event) {
+      const record = event.record;
+      const content = record.message && record.message.content;
+      if (record.type === "user" && isTaskNotificationText(content)) {
+        return extractTagText(content, "summary") || content;
+      }
+      if (record.type === "assistant" || record.type === "user") {
+        return contentBlocks(record).map(blockContentText).filter(Boolean).join("\n\n").trim();
+      }
+      if (record.type === "attachment") {
+        const attachment = record.attachment || {};
+        if (typeof attachment.content === "string") return attachment.content;
+        if (typeof attachment.prompt === "string" && isTaskNotificationText(attachment.prompt)) {
+          return extractTagText(attachment.prompt, "summary") || attachment.prompt;
+        }
+        return prettyJson(attachment);
+      }
+      if (record.type === "system" && record.content) return record.content;
+      if (record.type === "ai-title") return record.aiTitle || "";
+      if (record.content && typeof record.content === "string") {
+        if (isTaskNotificationText(record.content)) return extractTagText(record.content, "summary") || record.content;
+        return record.content;
+      }
+      return prettyJson(record);
+    }
+
+    function exportEventText(event) {
+      const record = event.record;
+      const head = "[" + event.lineNumber + "] " + (record.timestamp || "") + " " + event.kind + " " + (record.uuid || "");
+      return head + "\n" + eventContentText(event);
+    }
+
+    async function copyCardContent(lineNumber, button) {
+      const event = state.events.find((item) => String(item.lineNumber) === String(lineNumber));
+      if (!event) return;
+      await navigator.clipboard.writeText(eventContentText(event));
+      flash(button, "Copied");
+    }
+
+    function downloadVisibleJsonl() {
+      const text = state.visible.map((event) => event.raw).join("\n") + "\n";
+      const blob = new Blob([text], { type: "application/x-ndjson;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "claude-session-visible.jsonl";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function flash(button, text) {
+      const span = document.createElement("span");
+      span.className = "copy-flash";
+      span.textContent = text;
+      button.insertAdjacentElement("afterend", span);
+      setTimeout(() => span.remove(), 1200);
+    }
+
+    function scrollToLine(line) {
+      const target = document.getElementById("line-" + line);
+      if (target) target.scrollIntoView({ block: "start" });
+    }
+
+    function debounce(fn, delay) {
+      let timer = 0;
+      return (...args) => {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => fn(...args), delay);
+      };
+    }
+
+    const debouncedRenderAll = debounce(renderAll, 120);
+
+    el.chooseButton.addEventListener("click", () => {
+      chooseFileWithHandle().catch((error) => {
+        el.statusLine.textContent = "Select failed: " + error.message;
+      });
+    });
+    el.fileInput.addEventListener("change", (event) => loadFile(event.target.files && event.target.files[0]));
+    el.reloadLastButton.addEventListener("click", () => {
+      reloadLastFile(true).catch((error) => {
+        el.statusLine.textContent = "Reload last failed: " + error.message;
+      });
+    });
+    el.searchClearButton.addEventListener("click", () => {
+      el.searchInput.value = "";
+      updateSearchClear();
+      renderAll();
+      el.searchInput.focus();
+    });
+    el.themeButton.addEventListener("click", () => {
+      setTheme(currentTheme() === "dark" ? "light" : "dark");
+    });
+    el.downloadVisibleButton.addEventListener("click", downloadVisibleJsonl);
+
+    for (const control of [el.showUser, el.showAssistant, el.showTools, el.showResults, el.showAttachments, el.showMeta, el.showThinking, el.expandOutputs]) {
+      control.addEventListener("change", renderAll);
+    }
+    el.searchInput.addEventListener("input", () => {
+      updateSearchClear();
+      debouncedRenderAll();
+    });
+
+    el.turnList.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-line]");
+      if (button) scrollToLine(button.dataset.line);
+    });
+
+    el.turnToggleButton.addEventListener("click", () => {
+      state.showTurnSummaries = !state.showTurnSummaries;
+      renderOutline();
+    });
+
+    el.jumpTopButton.addEventListener("click", () => {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    el.jumpBottomButton.addEventListener("click", () => {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+    });
+
+    el.content.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-copy-line]");
+      if (!button) return;
+      event.preventDefault();
+      copyCardContent(button.dataset.copyLine, button).catch((error) => {
+        el.statusLine.textContent = "Copy card failed: " + error.message;
+      });
+    });
+
+    setTheme(currentTheme(), false);
+    updateSearchClear();
+
+    const src = new URL(window.location.href).searchParams.get("src");
+    if (src) {
+      fetch(src)
+        .then((response) => {
+          if (!response.ok) throw new Error(response.status + " " + response.statusText);
+          return response.text();
+        })
+        .then((text) => loadText(text, src))
+        .catch((error) => {
+          el.statusLine.textContent = "Fetch failed for src=" + src + ": " + error.message;
+        });
+    } else {
+      tryAutoReloadLastFile().catch(() => {
+        // It is fine if there is no remembered file yet.
+      });
+    }
+  </script>
+</body>
+</html>
