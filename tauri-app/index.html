@@ -190,10 +190,6 @@
       flex-wrap: wrap;
     }
 
-    .file-input {
-      display: none;
-    }
-
     .stats {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -840,10 +836,9 @@
 
       <section class="source-box">
         <div class="source-actions">
-          <button class="primary" id="chooseButton" type="button" title="Claude Code sessions are usually under ~/.claude/projects">Select JSONL</button>
+          <button class="primary" id="chooseButton" type="button" title="Opens a native file dialog. Cmd+Shift+. to show hidden folders like ~/.claude">Select JSONL</button>
           <button id="reloadLastButton" type="button">Reload Last</button>
         </div>
-        <input class="file-input" id="fileInput" type="file" accept=".jsonl,.json,application/json,text/plain">
       </section>
 
       <div class="stats" id="stats">
@@ -854,7 +849,7 @@
       </div>
 
       <div class="outline-title">
-        <button class="outline-toggle" id="turnToggleButton" type="button" aria-expanded="true" title="Toggle turn summaries">Turns ▾</button>
+        <button class="outline-toggle" id="turnToggleButton" type="button" aria-expanded="true" title="Toggle turn summaries">Turns &#9662;</button>
         <span id="turnCount">0</span>
       </div>
       <nav class="turn-list" id="turnList"></nav>
@@ -880,14 +875,14 @@
           <label class="check"><input id="showThinking" type="checkbox"> Thinking</label>
           <label class="check"><input id="expandOutputs" type="checkbox"> Expand outputs</label>
         </div>
-        <div class="status-line" id="statusLine">Select a JSONL file from ~/.claude/projects to start.</div>
+        <div class="status-line" id="statusLine">Select a session JSONL file from ~/.claude/projects to start.</div>
       </header>
 
       <section class="content" id="content">
         <div class="empty">
           <div>
             <strong>No JSONL loaded.</strong>
-            <div>Use Select JSONL to load a Claude Code session from ~/.claude/projects.</div>
+            <div>Use Select JSONL to open a Claude Code session file.</div>
           </div>
         </div>
       </section>
@@ -903,13 +898,15 @@
     </button>
   </div>
 
-  <script>
+  <script type="module">
+    import { open } from '@tauri-apps/plugin-dialog';
+    import { readTextFile } from '@tauri-apps/plugin-fs';
+    import { Store } from '@tauri-apps/plugin-store';
+
     "use strict";
 
-    const DEFAULT_SESSION_DIR_LABEL = "~/.claude/projects";
-    const DB_NAME = "claude-session-viewer";
-    const DB_STORE = "file-handles";
-    const LAST_HANDLE_KEY = "last-session-jsonl";
+    const STORE_FILE = "settings.json";
+    const LAST_FILE_KEY = "last-session-path";
     const META_TYPES = new Set(["mode", "permission-mode", "file-history-snapshot", "queue-operation", "last-prompt", "ai-title"]);
 
     const state = {
@@ -922,7 +919,6 @@
     };
 
     const el = {
-      fileInput: document.getElementById("fileInput"),
       chooseButton: document.getElementById("chooseButton"),
       reloadLastButton: document.getElementById("reloadLastButton"),
       searchWrap: document.getElementById("searchWrap"),
@@ -952,6 +948,36 @@
     const sunIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>';
     const clipboardIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
 
+    let settingsStore = null;
+
+    async function getStore() {
+      if (!settingsStore) {
+        settingsStore = await Store.load(STORE_FILE);
+      }
+      return settingsStore;
+    }
+
+    async function getLastPath() {
+      try {
+        const store = await getStore();
+        return await store.get(LAST_FILE_KEY);
+      } catch {
+        return null;
+      }
+    }
+
+    async function setLastPath(filePath) {
+      try {
+        const store = await getStore();
+        await store.set(LAST_FILE_KEY, filePath);
+        await store.save();
+      } catch {
+        // Non-critical if store write fails.
+      }
+    }
+
+    const CLAUDE_PROJECTS = "~/.claude/projects";
+
     function escapeHtml(value) {
       return String(value ?? "")
         .replaceAll("&", "&amp;")
@@ -978,115 +1004,62 @@
         try {
           localStorage.setItem("claudeSessionViewerTheme", next);
         } catch {
-          // Ignore storage failures when opened under stricter local browser settings.
+          // Ignore storage failures.
         }
       }
     }
 
-    function supportsRememberedFile() {
-      return "showOpenFilePicker" in window && "indexedDB" in window;
-    }
-
-    function openHandleDb() {
-      return new Promise((resolve, reject) => {
-        if (!("indexedDB" in window)) {
-          reject(new Error("IndexedDB is not available in this browser context."));
-          return;
-        }
-        const request = indexedDB.open(DB_NAME, 1);
-        request.onupgradeneeded = () => {
-          request.result.createObjectStore(DB_STORE);
-        };
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error || new Error("Failed to open IndexedDB."));
-      });
-    }
-
-    async function handleDbGet(key) {
-      const db = await openHandleDb();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(DB_STORE, "readonly");
-        const request = tx.objectStore(DB_STORE).get(key);
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error || new Error("Failed to read saved file handle."));
-      });
-    }
-
-    async function handleDbSet(key, value) {
-      const db = await openHandleDb();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(DB_STORE, "readwrite");
-        tx.objectStore(DB_STORE).put(value, key);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error || new Error("Failed to save file handle."));
-      });
-    }
-
-    async function loadFileHandle(handle, options = {}) {
-      const requestPermission = Boolean(options.requestPermission);
-      let permission = "prompt";
-      if (handle.queryPermission) {
-        permission = await handle.queryPermission({ mode: "read" });
-      }
-      if (permission !== "granted" && requestPermission && handle.requestPermission) {
-        permission = await handle.requestPermission({ mode: "read" });
-      }
-      if (permission !== "granted") {
-        el.statusLine.textContent = "Remembered file exists, but the browser needs permission again. Click Reload Last.";
-        return false;
-      }
-
-      const file = await handle.getFile();
-      await loadFile(file);
-      return true;
-    }
-
-    async function chooseFileWithHandle() {
-      if (!supportsRememberedFile()) {
-        el.fileInput.click();
-        return;
-      }
-
+    async function chooseFile() {
       try {
-        const [handle] = await window.showOpenFilePicker({
-          id: "claude-code-session-jsonl",
+        const selected = await open({
+          title: "Select Claude Code Session JSONL",
+          defaultPath: CLAUDE_PROJECTS,
           multiple: false,
-          types: [{
-            description: "Claude JSONL session",
-            accept: {
-              "application/x-ndjson": [".jsonl"],
-              "application/json": [".json"],
-              "text/plain": [".jsonl", ".txt"]
-            }
+          filters: [{
+            name: "JSONL / JSON",
+            extensions: ["jsonl", "json", "txt"]
           }]
         });
-        await handleDbSet(LAST_HANDLE_KEY, handle);
-        await loadFileHandle(handle, { requestPermission: true });
+
+        if (!selected) return;
+
+        const filePath = typeof selected === "string" ? selected : selected.path;
+        await loadFileByPath(filePath);
+        await setLastPath(filePath);
       } catch (error) {
-        if (error && error.name === "AbortError") return;
-        el.statusLine.textContent = "File picker failed: " + error.message + ". Falling back to standard picker.";
-        el.fileInput.click();
+        el.statusLine.textContent = "Select failed: " + error.message;
       }
     }
 
-    async function reloadLastFile(requestPermission = true) {
-      if (!supportsRememberedFile()) {
-        el.statusLine.textContent = "This browser cannot remember local file handles. Use Select JSONL and choose a file under " + DEFAULT_SESSION_DIR_LABEL + ".";
-        return false;
+    async function reloadLastFile() {
+      const lastPath = await getLastPath();
+      if (!lastPath) {
+        el.statusLine.textContent = "No remembered session yet. Use Select JSONL to pick one from " + CLAUDE_PROJECTS + ".";
+        return;
       }
-      const handle = await handleDbGet(LAST_HANDLE_KEY);
-      if (!handle) {
-        el.statusLine.textContent = "No remembered session yet. Use Select JSONL once from " + DEFAULT_SESSION_DIR_LABEL + ".";
-        return false;
+      try {
+        await loadFileByPath(lastPath);
+      } catch (error) {
+        el.statusLine.textContent = "Reload failed: " + error.message + ". The file may have moved — use Select JSONL to pick it again.";
+        await setLastPath(null);
       }
-      return loadFileHandle(handle, { requestPermission });
     }
 
     async function tryAutoReloadLastFile() {
-      if (!supportsRememberedFile()) return;
-      const handle = await handleDbGet(LAST_HANDLE_KEY);
-      if (!handle) return;
-      await loadFileHandle(handle, { requestPermission: false });
+      const lastPath = await getLastPath();
+      if (!lastPath) return;
+      try {
+        await loadFileByPath(lastPath);
+      } catch {
+        // It is fine if the last file is no longer accessible.
+      }
+    }
+
+    async function loadFileByPath(filePath) {
+      const basename = filePath.split("/").pop() || filePath;
+      el.statusLine.textContent = "Reading " + basename + "...";
+      const text = await readTextFile(filePath);
+      loadText(text, basename);
     }
 
     function shortId(value) {
@@ -1476,11 +1449,12 @@
         : "Loaded " + state.events.length + " records from " + state.sourceName + ".";
     }
 
-    async function loadFile(file) {
-      if (!file) return;
-      el.statusLine.textContent = "Reading " + file.name + " (" + bytes(file.size) + ")...";
-      const text = await file.text();
-      loadText(text, file.name);
+    async function loadUrl(src) {
+      el.statusLine.textContent = "Fetching " + src + "...";
+      const response = await fetch(src);
+      if (!response.ok) throw new Error(response.status + " " + response.statusText);
+      const text = await response.text();
+      loadText(text, src);
     }
 
     function filters() {
@@ -1547,7 +1521,7 @@
         if (lastIndex < text.length) {
           fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
         }
-        node.parentnode.replaceChild(fragment, node);
+        node.parentNode.replaceChild(fragment, node);
       }
     }
 
@@ -1847,7 +1821,7 @@
       state.visible = visible;
 
       if (!state.events.length) {
-        el.content.innerHTML = '<div class="empty"><div><strong>No JSONL loaded.</strong><div>Use Select JSONL to load a Claude Code session from ' + escapeHtml(DEFAULT_SESSION_DIR_LABEL) + '.</div></div></div>';
+        el.content.innerHTML = '<div class="empty"><div><strong>No JSONL loaded.</strong><div>Use Select JSONL to open a Claude Code session file.</div></div></div>';
       } else if (!visible.length) {
         el.content.innerHTML = '<div class="empty"><div><strong>No matching records.</strong><div>Adjust search or filters.</div></div></div>';
       } else {
@@ -1949,30 +1923,34 @@
     const debouncedRenderAll = debounce(renderAll, 120);
 
     el.chooseButton.addEventListener("click", () => {
-      chooseFileWithHandle().catch((error) => {
+      chooseFile().catch((error) => {
         el.statusLine.textContent = "Select failed: " + error.message;
       });
     });
-    el.fileInput.addEventListener("change", (event) => loadFile(event.target.files && event.target.files[0]));
+
     el.reloadLastButton.addEventListener("click", () => {
-      reloadLastFile(true).catch((error) => {
+      reloadLastFile().catch((error) => {
         el.statusLine.textContent = "Reload last failed: " + error.message;
       });
     });
+
     el.searchClearButton.addEventListener("click", () => {
       el.searchInput.value = "";
       updateSearchClear();
       renderAll();
       el.searchInput.focus();
     });
+
     el.themeButton.addEventListener("click", () => {
       setTheme(currentTheme() === "dark" ? "light" : "dark");
     });
+
     el.downloadVisibleButton.addEventListener("click", downloadVisibleJsonl);
 
     for (const control of [el.showUser, el.showAssistant, el.showTools, el.showResults, el.showAttachments, el.showMeta, el.showThinking, el.expandOutputs]) {
       control.addEventListener("change", renderAll);
     }
+
     el.searchInput.addEventListener("input", () => {
       updateSearchClear();
       debouncedRenderAll();
@@ -2008,17 +1986,13 @@
     setTheme(currentTheme(), false);
     updateSearchClear();
 
-    const src = new URL(window.location.href).searchParams.get("src");
+    // ---- startup: auto-reload last file, or fetch via ?src= parameter ----
+    const params = new URL(window.location.href).searchParams;
+    const src = params.get("src");
     if (src) {
-      fetch(src)
-        .then((response) => {
-          if (!response.ok) throw new Error(response.status + " " + response.statusText);
-          return response.text();
-        })
-        .then((text) => loadText(text, src))
-        .catch((error) => {
-          el.statusLine.textContent = "Fetch failed for src=" + src + ": " + error.message;
-        });
+      loadUrl(src).catch((error) => {
+        el.statusLine.textContent = "Fetch failed for src=" + src + ": " + error.message;
+      });
     } else {
       tryAutoReloadLastFile().catch(() => {
         // It is fine if there is no remembered file yet.
