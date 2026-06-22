@@ -248,7 +248,8 @@
       display: grid;
       gap: 6px;
       max-height: 260px;
-      overflow: auto;
+      overflow-y: auto;
+      overflow-x: hidden;
       min-height: 0;
     }
 
@@ -298,18 +299,16 @@
 
     .pinned-open .pin-title {
       font-weight: 550;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     .pinned-open .pin-meta {
       color: var(--muted);
       font-family: var(--mono);
       font-size: 10px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     .pinned-remove {
@@ -419,13 +418,17 @@
 
     .turn-list {
       display: grid;
+      grid-template-columns: minmax(0, 1fr);
       gap: 6px;
       flex: 1;
-      overflow: auto;
+      overflow-y: auto;
+      overflow-x: hidden;
       min-height: 0;
     }
 
     .turn-button {
+      display: flex;
+      flex-direction: column;
       width: 100%;
       text-align: left;
       border: 1px solid transparent;
@@ -433,6 +436,8 @@
       padding: 8px;
       border-radius: 7px;
       color: var(--ink);
+      min-width: 0;
+      overflow-wrap: anywhere;
     }
 
     .turn-button:hover {
@@ -448,6 +453,8 @@
       max-height: 2.5em;
       overflow: hidden;
       font-weight: 400;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     .turn-button span {
@@ -456,6 +463,8 @@
       font-family: var(--mono);
       font-size: 11px;
       margin-bottom: 3px;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     .main {
@@ -1106,7 +1115,7 @@
 
   <script type="module">
     import { open } from '@tauri-apps/plugin-dialog';
-    import { readTextFile } from '@tauri-apps/plugin-fs';
+    import { invoke } from '@tauri-apps/api/core';
     import { Store } from '@tauri-apps/plugin-store';
     import logoUrl from './src/assets/mira-logo.png';
 
@@ -1342,7 +1351,8 @@
         await loadFileByPath(path);
         await setLastPath(path);
       } catch (error) {
-        el.statusLine.textContent = "Pinned file could not be opened: " + error.message + ". It may have moved — click \u00d7 on the pin to remove it.";
+        const msg = (error && error.message) ? error.message : String(error);
+        el.statusLine.textContent = "Pinned file could not be opened: " + msg + ". It may have moved — click \u00d7 on the pin to remove it.";
       }
     }
 
@@ -1431,7 +1441,7 @@
       const myLoadId = ++currentLoadId;
       const basename = filePath.split("/").pop() || filePath;
       el.statusLine.textContent = "Reading " + basename + "...";
-      const text = await readTextFile(filePath);
+      const text = await invoke("read_session_file", { path: filePath });
       if (myLoadId !== currentLoadId) return;
       state.currentPath = filePath;
       loadText(text, basename);
@@ -2911,8 +2921,18 @@
     }
 
     function scrollToLine(line) {
-      const target = document.getElementById("line-" + line);
-      if (target) target.scrollIntoView({ block: "start" });
+      const ln = String(line);
+      let target = document.getElementById("line-" + ln);
+      if (!target) {
+        const turn = state.turns.find((t) => String(t.lineNumber) === ln);
+        if (turn) {
+          const firstVisible = state.visible.find((e) => e.turnId === turn.id);
+          if (firstVisible) target = document.getElementById("line-" + firstVisible.lineNumber);
+        }
+      }
+      if (!target) return;
+      const y = target.getBoundingClientRect().top + window.scrollY - 118;
+      window.scrollTo({ top: y, behavior: "smooth" });
     }
 
     function debounce(fn, delay) {
