@@ -22,7 +22,7 @@ The app auto-detects the format when you open a file — no manual switching nee
 - **Search** — full-text search across all record fields with highlighted matches
 - **Role filters** — toggle visibility: User, Assistant, Tool calls, Tool results, Attachments, Metadata, Thinking
 - **Turn navigation** — auto-detected conversation turns with a collapsible sidebar outline
-- **Token usage stats** — Claude Code: deduplicated by `requestId`; Codex CLI: summed per turn from `token_count` events
+- **Token usage stats** — Claude Code: deduplicated by `requestId`; Codex CLI: summed from `token_count` reports
 - **Markdown rendering** — headings, lists, task lists, blockquotes, tables, code blocks, inline code, links, images. Unicode box-drawing tables (used by Codex CLI terminal output) are preserved as monospaced blocks
 - **Tool call/result display** — formatted cards with input summaries, expandable JSON details, collapsible outputs. Codex CLI's `exec_command`, `apply_patch`, `update_plan`, `spawn_agent` and other tools are supported
 - **Patch apply rendering** — Codex CLI `patch_apply_end` events show changed files and unified diffs
