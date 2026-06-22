@@ -1,10 +1,10 @@
 [package]
-name = "coding-agent-session-viewer"
+name = "mira"
 version = "1.0.0"
 edition = "2021"
 
 [lib]
-name = "coding_agent_session_viewer_lib"
+name = "mira_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
