@@ -9,7 +9,7 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_title("Coding Agent Session Viewer");
+                let _ = window.set_title("Mira");
             }
             Ok(())
         })

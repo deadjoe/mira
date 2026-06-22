@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Coding Agent Session Viewer</title>
+  <title>Mira</title>
   <script>
     (() => {
       try {
@@ -167,11 +167,32 @@
     }
 
     .brand {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
       margin-bottom: 16px;
     }
 
+    .brand-logo {
+      width: 96px;
+      height: 96px;
+      flex: 0 0 auto;
+      background-color: var(--ink);
+      -webkit-mask-size: contain;
+      mask-size: contain;
+      -webkit-mask-repeat: no-repeat;
+      mask-repeat: no-repeat;
+      -webkit-mask-position: center;
+      mask-position: center;
+    }
+
+    .brand-text {
+      min-width: 0;
+    }
+
     .brand h1 {
-      margin: 0 0 4px;
+      margin: 0 0 2px;
       font-size: 18px;
       line-height: 1.25;
       font-weight: 750;
@@ -196,6 +217,149 @@
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
+    }
+
+    .pinned-box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 10px 12px;
+      margin-bottom: 14px;
+      box-shadow: var(--shadow);
+    }
+
+    .pinned-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.2px;
+    }
+
+    .pinned-count {
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .pinned-list {
+      display: grid;
+      gap: 6px;
+      max-height: 260px;
+      overflow: auto;
+      min-height: 0;
+    }
+
+    .pinned-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      padding: 2px 4px 2px 6px;
+    }
+
+    .pinned-item:hover {
+      border-color: var(--line-strong);
+      background: var(--panel-soft);
+    }
+
+    .pinned-item.active {
+      border-color: color-mix(in srgb, var(--teal) 55%, var(--line));
+      background: var(--teal-soft);
+    }
+
+    .pinned-open {
+      flex: 1 1 0;
+      min-width: 0;
+      text-align: left;
+      border: 0;
+      background: transparent;
+      padding: 6px 4px;
+      border-radius: 6px;
+      color: var(--ink);
+      font-size: 12px;
+      line-height: 1.25;
+      min-height: 28px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      overflow: hidden;
+    }
+
+    .pinned-open:hover {
+      border: 0;
+      color: var(--teal);
+      background: transparent;
+    }
+
+    .pinned-open .pin-title {
+      font-weight: 550;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .pinned-open .pin-meta {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .pinned-remove {
+      flex: 0 0 auto;
+      width: 24px;
+      height: 24px;
+      min-height: 24px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 0;
+      font-size: 15px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .pinned-remove:hover {
+      background: color-mix(in srgb, var(--red) 18%, transparent);
+      color: var(--red);
+      border: 0;
+    }
+
+    .pinned-empty {
+      color: var(--muted);
+      font-size: 12px;
+      padding: 4px 0;
+    }
+
+    .pin-edit-input {
+      width: 100%;
+      height: 24px;
+      border: 1px solid var(--teal);
+      border-radius: 5px;
+      padding: 2px 6px;
+      background: var(--panel);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 550;
+      line-height: 1.25;
+    }
+
+    .pin-edit-input:focus {
+      outline: none;
+      border-color: var(--teal);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
 
     .stats {
@@ -859,14 +1023,27 @@
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <h1>Session Viewer</h1>
-        <div class="brand-sub">Claude Code &middot; Codex CLI</div>
+        <div class="brand-logo" id="brandLogo" aria-hidden="true"></div>
+        <div class="brand-text">
+          <div class="brand-sub">Claude Code &middot; Codex CLI JSONL Viewer</div>
+        </div>
       </div>
 
       <section class="source-box">
         <div class="source-actions">
           <button class="primary" id="chooseButton" type="button" title="Opens a native file dialog. Cmd+Shift+. to show hidden folders like ~/.claude or ~/.codex">Select JSONL</button>
           <button id="reloadLastButton" type="button">Reload Last</button>
+          <button id="pinToggleButton" type="button" disabled title="Pin the current file so you can reopen it from the Pinned list">Pin</button>
+        </div>
+      </section>
+
+      <section class="pinned-box">
+        <div class="pinned-head">
+          <span>Pinned</span>
+          <span class="pinned-count" id="pinnedCount">0</span>
+        </div>
+        <div class="pinned-list" id="pinnedList">
+          <div class="pinned-empty">No pinned sessions yet. Open a file and click Pin.</div>
         </div>
       </section>
 
@@ -931,11 +1108,13 @@
     import { open } from '@tauri-apps/plugin-dialog';
     import { readTextFile } from '@tauri-apps/plugin-fs';
     import { Store } from '@tauri-apps/plugin-store';
+    import logoUrl from './src/assets/mira-logo.png';
 
     "use strict";
 
     const STORE_FILE = "settings.json";
     const LAST_FILE_KEY = "last-session-path";
+    const PINS_KEY = "pinned-sessions";
     const META_TYPES = new Set(["mode", "permission-mode", "file-history-snapshot", "queue-operation", "last-prompt", "ai-title"]);
 
     const state = {
@@ -945,12 +1124,16 @@
       events: [],
       turns: [],
       visible: [],
-      showTurnSummaries: true
+      showTurnSummaries: true,
+      currentPath: "",
+      currentAiTitle: "",
+      pins: []
     };
 
     const el = {
       chooseButton: document.getElementById("chooseButton"),
       reloadLastButton: document.getElementById("reloadLastButton"),
+      brandLogo: document.getElementById("brandLogo"),
       searchWrap: document.getElementById("searchWrap"),
       searchInput: document.getElementById("searchInput"),
       searchClearButton: document.getElementById("searchClearButton"),
@@ -971,7 +1154,10 @@
       turnCount: document.getElementById("turnCount"),
       statusLine: document.getElementById("statusLine"),
       jumpTopButton: document.getElementById("jumpTopButton"),
-      jumpBottomButton: document.getElementById("jumpBottomButton")
+      jumpBottomButton: document.getElementById("jumpBottomButton"),
+      pinToggleButton: document.getElementById("pinToggleButton"),
+      pinnedList: document.getElementById("pinnedList"),
+      pinnedCount: document.getElementById("pinnedCount")
     };
 
     const moonIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 7 7 0 1 0 20.5 14.5Z"></path></svg>';
@@ -1003,6 +1189,160 @@
         await store.save();
       } catch {
         // Non-critical if store write fails.
+      }
+    }
+
+    async function loadPins() {
+      try {
+        const store = await getStore();
+        const pins = await store.get(PINS_KEY);
+        state.pins = Array.isArray(pins) ? pins : [];
+      } catch {
+        state.pins = [];
+      }
+    }
+
+    async function savePins() {
+      try {
+        const store = await getStore();
+        await store.set(PINS_KEY, state.pins);
+        await store.save();
+      } catch {
+        // Non-critical if store write fails.
+      }
+    }
+
+    function isCurrentPinned() {
+      return Boolean(state.currentPath) && state.pins.some((p) => p.path === state.currentPath);
+    }
+
+    function updatePinToggleState() {
+      const btn = el.pinToggleButton;
+      if (!state.currentPath) {
+        btn.disabled = true;
+        btn.textContent = "Pin";
+        btn.title = "Open a file first, then pin it.";
+        return;
+      }
+      btn.disabled = false;
+      if (isCurrentPinned()) {
+        btn.textContent = "Unpin";
+        btn.title = "Remove this file from the Pinned list";
+      } else {
+        btn.textContent = "Pin";
+        btn.title = "Pin this file so you can reopen it from the Pinned list";
+      }
+    }
+
+    async function addCurrentPin() {
+      if (!state.currentPath || isCurrentPinned()) return;
+      const path = state.currentPath;
+      const name = path.split("/").pop() || path;
+      state.pins.push({
+        path,
+        name,
+        title: state.currentAiTitle || name,
+        format: state.format || "claude",
+        pinnedAt: Date.now()
+      });
+      await savePins();
+      updatePinToggleState();
+      renderPins();
+    }
+
+    async function removePin(path) {
+      state.pins = state.pins.filter((p) => p.path !== path);
+      await savePins();
+      updatePinToggleState();
+      renderPins();
+    }
+
+    function pinDisplayLabel(pin) {
+      return pin.label || pin.title || pin.name || pin.path;
+    }
+
+    function renderPins() {
+      el.pinnedCount.textContent = String(state.pins.length);
+      if (!state.pins.length) {
+        el.pinnedList.innerHTML = '<div class="pinned-empty">No pinned sessions yet. Open a file and click Pin.</div>';
+        return;
+      }
+      const sorted = state.pins.slice().sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0));
+      el.pinnedList.innerHTML = sorted.map((p) => {
+        const active = p.path === state.currentPath ? " active" : "";
+        const fmt = p.format === "codex" ? "codex" : "claude";
+        const display = pinDisplayLabel(p);
+        return [
+          '<div class="pinned-item' + active + '">',
+          '<button class="pinned-open" type="button" data-pin-path="' + escapeHtml(p.path) + '" data-pin-edit="' + escapeHtml(p.path) + '" title="' + escapeHtml(p.path) + ' — double-click to rename">',
+          '<span class="pin-title">' + escapeHtml(display) + '</span>',
+          '<span class="pin-meta">' + fmt + '</span>',
+          '</button>',
+          '<button class="pinned-remove" type="button" data-pin-remove="' + escapeHtml(p.path) + '" aria-label="Unpin" title="Unpin">&times;</button>',
+          '</div>'
+        ].join("");
+      }).join("");
+    }
+
+    async function renamePin(path, newLabel) {
+      const pin = state.pins.find((p) => p.path === path);
+      if (!pin) return;
+      const trimmed = String(newLabel).trim();
+      if (trimmed) {
+        pin.label = trimmed;
+      } else {
+        delete pin.label;
+      }
+      await savePins();
+      renderPins();
+    }
+
+    function startPinEdit(path) {
+      const item = el.pinnedList.querySelector('[data-pin-edit="' + cssAttrEscape(path) + '"]');
+      if (!item) return;
+      const pin = state.pins.find((p) => p.path === path);
+      if (!pin) return;
+      const titleSpan = item.querySelector(".pin-title");
+      if (!titleSpan) return;
+      const input = document.createElement("input");
+      input.className = "pin-edit-input";
+      input.type = "text";
+      input.value = pin.label || pin.title || pin.name || "";
+      input.placeholder = pin.name || "Label";
+      titleSpan.replaceWith(input);
+      input.focus();
+      input.select();
+      let done = false;
+      const commit = () => {
+        if (done) return;
+        done = true;
+        renamePin(path, input.value);
+      };
+      const cancel = () => {
+        if (done) return;
+        done = true;
+        renderPins();
+      };
+      input.addEventListener("blur", commit);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+        else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+      });
+    }
+
+    function cssAttrEscape(value) {
+      return String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+    }
+
+    async function openPinnedFile(path) {
+      const pin = state.pins.find((p) => p.path === path);
+      const label = pin ? pinDisplayLabel(pin) : (path.split("/").pop() || path);
+      el.statusLine.textContent = "Opening pinned: " + label + "...";
+      try {
+        await loadFileByPath(path);
+        await setLastPath(path);
+      } catch (error) {
+        el.statusLine.textContent = "Pinned file could not be opened: " + error.message + ". It may have moved — click \u00d7 on the pin to remove it.";
       }
     }
 
@@ -1085,10 +1425,15 @@
       }
     }
 
+    let currentLoadId = 0;
+
     async function loadFileByPath(filePath) {
+      const myLoadId = ++currentLoadId;
       const basename = filePath.split("/").pop() || filePath;
       el.statusLine.textContent = "Reading " + basename + "...";
       const text = await readTextFile(filePath);
+      if (myLoadId !== currentLoadId) return;
+      state.currentPath = filePath;
       loadText(text, basename);
     }
 
@@ -1785,10 +2130,13 @@
 
       const firstTitle = state.events.find((event) => event.record.type === "ai-title" && event.record.aiTitle);
       const title = firstTitle ? firstTitle.record.aiTitle : state.sourceName;
+      state.currentAiTitle = title;
       const fmtLabel = state.format === "codex" ? "Codex CLI" : "Claude Code";
       el.statusLine.textContent = parsed.errors.length
         ? "Loaded with " + parsed.errors.length + " parse errors. Valid records are shown."
         : "Loaded " + state.events.length + " " + fmtLabel + " records from " + state.sourceName + ".";
+      updatePinToggleState();
+      renderPins();
     }
 
     async function loadUrl(src) {
@@ -2602,6 +2950,46 @@
 
     el.downloadVisibleButton.addEventListener("click", downloadVisibleJsonl);
 
+    el.pinToggleButton.addEventListener("click", () => {
+      if (!state.currentPath) return;
+      if (isCurrentPinned()) {
+        removePin(state.currentPath);
+      } else {
+        addCurrentPin();
+      }
+    });
+
+    let pinClickTimer = 0;
+
+    el.pinnedList.addEventListener("click", (event) => {
+      const removeBtn = event.target.closest("[data-pin-remove]");
+      if (removeBtn) {
+        event.stopPropagation();
+        removePin(removeBtn.dataset.pinRemove);
+        return;
+      }
+      const openBtn = event.target.closest("[data-pin-path]");
+      if (openBtn) {
+        event.stopPropagation();
+        const path = openBtn.dataset.pinPath;
+        window.clearTimeout(pinClickTimer);
+        pinClickTimer = window.setTimeout(() => {
+          openPinnedFile(path).catch((error) => {
+            el.statusLine.textContent = "Open pinned failed: " + error.message;
+          });
+        }, 220);
+      }
+    });
+
+    el.pinnedList.addEventListener("dblclick", (event) => {
+      const openBtn = event.target.closest("[data-pin-edit]");
+      if (!openBtn) return;
+      event.stopPropagation();
+      event.preventDefault();
+      window.clearTimeout(pinClickTimer);
+      startPinEdit(openBtn.dataset.pinEdit);
+    });
+
     for (const control of [el.showUser, el.showAssistant, el.showTools, el.showResults, el.showAttachments, el.showMeta, el.showThinking, el.expandOutputs]) {
       control.addEventListener("change", renderAll);
     }
@@ -2640,6 +3028,18 @@
 
     setTheme(currentTheme(), false);
     updateSearchClear();
+
+    if (el.brandLogo && logoUrl) {
+      el.brandLogo.style.webkitMaskImage = "url('" + logoUrl + "')";
+      el.brandLogo.style.maskImage = "url('" + logoUrl + "')";
+    }
+
+    loadPins().then(() => {
+      updatePinToggleState();
+      renderPins();
+    }).catch(() => {
+      // Non-critical if pinned sessions cannot be loaded.
+    });
 
     // ---- startup: auto-reload last file, or fetch via ?src= parameter ----
     const params = new URL(window.location.href).searchParams;
