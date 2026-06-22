@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Claude Code Session Viewer</title>
+  <title>Coding Agent Session Viewer</title>
   <script>
     (() => {
       try {
@@ -175,6 +175,12 @@
       font-size: 18px;
       line-height: 1.25;
       font-weight: 750;
+    }
+
+    .brand-sub {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.2px;
     }
 
     .source-box {
@@ -573,6 +579,23 @@
       background: var(--panel);
     }
 
+    .md pre.box-table {
+      overflow-x: auto;
+      margin: 10px 0;
+      padding: 12px 14px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 12.5px;
+      line-height: 1.5;
+      white-space: pre;
+      word-break: normal;
+      overflow-wrap: normal;
+      max-height: none;
+      tab-size: 4;
+    }
+
     .md table {
       width: 100%;
       border-collapse: collapse;
@@ -836,12 +859,13 @@
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <h1>Claude Code Session Viewer</h1>
+        <h1>Session Viewer</h1>
+        <div class="brand-sub">Claude Code &middot; Codex CLI</div>
       </div>
 
       <section class="source-box">
         <div class="source-actions">
-          <button class="primary" id="chooseButton" type="button" title="Opens a native file dialog. Cmd+Shift+. to show hidden folders like ~/.claude">Select JSONL</button>
+          <button class="primary" id="chooseButton" type="button" title="Opens a native file dialog. Cmd+Shift+. to show hidden folders like ~/.claude or ~/.codex">Select JSONL</button>
           <button id="reloadLastButton" type="button">Reload Last</button>
         </div>
       </section>
@@ -880,14 +904,14 @@
           <label class="check"><input id="showThinking" type="checkbox"> Thinking</label>
           <label class="check"><input id="expandOutputs" type="checkbox"> Expand outputs</label>
         </div>
-        <div class="status-line" id="statusLine">Select a session JSONL file from ~/.claude/projects to start.</div>
+        <div class="status-line" id="statusLine">Select a session JSONL file (Claude Code ~/.claude/projects or Codex CLI ~/.codex/sessions) to start.</div>
       </header>
 
       <section class="content" id="content">
         <div class="empty">
           <div>
             <strong>No JSONL loaded.</strong>
-            <div>Use Select JSONL to open a Claude Code session file.</div>
+            <div>Use Select JSONL to open a Claude Code or Codex CLI session file.</div>
           </div>
         </div>
       </section>
@@ -916,6 +940,7 @@
 
     const state = {
       sourceName: "",
+      format: "",
       rows: [],
       events: [],
       turns: [],
@@ -1017,7 +1042,7 @@
     async function chooseFile() {
       try {
         const selected = await open({
-          title: "Select Claude Code Session JSONL",
+          title: "Select Session JSONL",
           defaultPath: CLAUDE_PROJECTS,
           multiple: false,
           filters: [{
@@ -1039,7 +1064,7 @@
     async function reloadLastFile() {
       const lastPath = await getLastPath();
       if (!lastPath) {
-        el.statusLine.textContent = "No remembered session yet. Use Select JSONL to pick one from " + CLAUDE_PROJECTS + ".";
+        el.statusLine.textContent = "No remembered session yet. Use Select JSONL to pick one from ~/.claude/projects or ~/.codex/sessions.";
         return;
       }
       try {
@@ -1181,6 +1206,20 @@
       return '<div class="table-wrap"><table><thead><tr>' + head + "</tr></thead><tbody>" + body + "</tbody></table></div>";
     }
 
+    // Detect Unicode box-drawing tables (┌─┬─┐ │ ├ ┼ ┤ └ ┴ ┘) used by Codex/terminals.
+    // These are not markdown tables and must be rendered as <pre> to preserve alignment.
+    const BOX_DRAWING_RE = /[\u2500-\u257F]/;
+
+    function isBoxDrawingLine(line) {
+      const trimmed = line.trim();
+      if (!trimmed) return false;
+      // A box-drawing line has at least one box char and is mostly box/whitespace/CJK.
+      if (!BOX_DRAWING_RE.test(trimmed)) return false;
+      const nonBox = trimmed.replace(/[\u2500-\u257F\s]/g, "");
+      // Allow CJK and common content inside boxes, but require box chars to dominate structure.
+      return trimmed.length >= 4;
+    }
+
     function formatMarkdown(text) {
       const lines = String(text ?? "").split(/\r?\n/);
       let html = "";
@@ -1209,6 +1248,19 @@
 
         if (inCode) {
           code.push(line);
+          continue;
+        }
+
+        // Box-drawing table: collect consecutive box-drawing lines into a <pre> block.
+        if (isBoxDrawingLine(line)) {
+          const boxLines = [line];
+          index += 1;
+          while (index < lines.length && (isBoxDrawingLine(lines[index]) || lines[index].trim() === "")) {
+            boxLines.push(lines[index]);
+            index += 1;
+          }
+          index -= 1;
+          html += '<pre class="box-table"><code>' + escapeHtml(boxLines.join("\n")) + "</code></pre>";
           continue;
         }
 
@@ -1354,6 +1406,231 @@
       return trimmed.length > 80;
     }
 
+    // ---- Codex CLI format detection and normalization ----
+    // Codex JSONL records carry a top-level `payload` object and use top-level
+    // types: session_meta, turn_context, response_item, event_msg, compacted.
+    // Claude Code records instead have a top-level `message` object and/or
+    // `uuid`, and use top-level types: user, assistant, system, attachment, ...
+
+    const CODEX_TOP_TYPES = new Set(["session_meta", "turn_context", "response_item", "event_msg", "compacted"]);
+
+    function detectFormat(text) {
+      const lines = String(text || "").split(/\r?\n/);
+      const limit = Math.min(lines.length, 25);
+      for (let i = 0; i < limit; i++) {
+        const raw = lines[i].trim();
+        if (!raw) continue;
+        try {
+          const rec = JSON.parse(raw);
+          if (!rec || typeof rec !== "object") continue;
+          if ("payload" in rec && CODEX_TOP_TYPES.has(rec.type)) return "codex";
+          if (rec.type === "user" || rec.type === "assistant" || rec.type === "system" || rec.type === "attachment" || rec.type === "mode" || rec.type === "ai-title" || "uuid" in rec || "message" in rec) {
+            return "claude";
+          }
+        } catch {
+          // Skip unparseable leading lines.
+        }
+      }
+      return "claude";
+    }
+
+    function codexPayload(record) {
+      return (record && record.payload) || {};
+    }
+
+    function codexBlocks(record) {
+      // Normalize a Codex record into Claude-compatible blocks so existing
+      // render helpers can be reused. Codex-specific extras are carried under
+      // underscore-prefixed keys consumed by renderCodexEvent.
+      const top = record.type || "";
+      const payload = codexPayload(record);
+      const ptype = payload.type || "";
+
+      if (top === "response_item") {
+        if (ptype === "message") {
+          const role = payload.role || "unknown";
+          const content = Array.isArray(payload.content) ? payload.content : [];
+          return content.map((item) => {
+            if (!item || typeof item !== "object") return { type: "text", text: "", _role: role };
+            if (item.type === "input_text" || item.type === "output_text" || item.type === "text") {
+              return { type: "text", text: item.text || "", _role: role };
+            }
+            return { type: "text", text: prettyJson(item), _role: role };
+          });
+        }
+        if (ptype === "function_call") {
+          let input;
+          try { input = JSON.parse(payload.arguments || "{}"); } catch { input = { _raw: payload.arguments || "" }; }
+          return [{ type: "tool_use", id: payload.call_id || "", name: payload.name || "function", input, _turn_id: payload.metadata && payload.metadata.turn_id }];
+        }
+        if (ptype === "function_call_output") {
+          return [{ type: "tool_result", tool_use_id: payload.call_id || "", content: payload.output || "" }];
+        }
+        if (ptype === "custom_tool_call") {
+          return [{ type: "tool_use", id: payload.call_id || "", name: payload.name || "custom_tool", input: payload.input || "", _custom: true, _status: payload.status || "" }];
+        }
+        if (ptype === "custom_tool_call_output") {
+          return [{ type: "tool_result", tool_use_id: payload.call_id || "", content: payload.output || "" }];
+        }
+        if (ptype === "tool_search_call") {
+          return [{ type: "tool_use", id: payload.call_id || "", name: "tool_search", input: payload.arguments || {}, _turn_id: payload.metadata && payload.metadata.turn_id }];
+        }
+        if (ptype === "tool_search_output") {
+          return [{ type: "tool_result", tool_use_id: payload.call_id || "", content: payload.tools || "" }];
+        }
+        if (ptype === "reasoning") {
+          const summary = Array.isArray(payload.summary)
+            ? payload.summary.map((s) => (s && s.text) || "").filter(Boolean).join("\n")
+            : "";
+          return [{ type: "thinking", thinking: summary, text: summary, encrypted: payload.encrypted_content || "", _turn_id: payload.metadata && payload.metadata.turn_id }];
+        }
+      }
+
+      if (top === "event_msg") {
+        if (ptype === "user_message") {
+          return [{ type: "text", text: payload.message || "", _user_message: true }];
+        }
+        if (ptype === "agent_message") {
+          return [{ type: "text", text: payload.message || "", _phase: payload.phase || "", _agent_message: true }];
+        }
+        if (ptype === "patch_apply_end") {
+          return [{
+            type: "tool_result",
+            tool_use_id: payload.call_id || "",
+            content: payload.stdout || "",
+            _patch: {
+              stdout: payload.stdout || "",
+              stderr: payload.stderr || "",
+              success: payload.success,
+              changes: payload.changes || {},
+              turn_id: payload.turn_id || ""
+            }
+          }];
+        }
+        if (ptype === "task_complete") {
+          return [{ type: "text", text: payload.last_agent_message || "", _task_complete: true, _turn_id: payload.turn_id || "" }];
+        }
+        // token_count, task_started, context_compacted -> meta, no blocks.
+        return [];
+      }
+
+      // session_meta, turn_context, compacted -> meta, no blocks.
+      return [];
+    }
+
+    function codexRoleKind(record) {
+      const top = record.type || "";
+      const payload = codexPayload(record);
+      const ptype = payload.type || "";
+
+      if (top === "session_meta" || top === "turn_context" || top === "compacted") return "meta";
+      if (top === "event_msg") {
+        if (ptype === "user_message") return "user";
+        if (ptype === "agent_message") return "assistant";
+        if (ptype === "patch_apply_end") return "tool-result";
+        if (ptype === "task_complete") return "assistant";
+        return "meta";
+      }
+      if (top === "response_item") {
+        if (ptype === "message") {
+          const role = payload.role || "user";
+          if (role === "assistant") return "assistant";
+          if (role === "developer") return "system";
+          return "user";
+        }
+        if (ptype === "function_call" || ptype === "custom_tool_call" || ptype === "tool_search_call") return "tool-call";
+        if (ptype === "function_call_output" || ptype === "custom_tool_call_output" || ptype === "tool_search_output") return "tool-result";
+        if (ptype === "reasoning") return "assistant";
+      }
+      return "meta";
+    }
+
+    // Codex injects wrapper tags into some user-role messages as system context,
+    // not real user input. Treat those as meta so they stay hidden by default.
+    const CODEX_SYSTEM_TAGS = ["<environment_context>", "<subagent_notification>"];
+
+    function codexUserMessageIsSystem(payload) {
+      const content = Array.isArray(payload.content) ? payload.content : [];
+      if (!content.length) return false;
+      return content.every((item) => {
+        const text = String((item && item.text) || "").trim();
+        if (!text) return true;
+        return CODEX_SYSTEM_TAGS.some((tag) => text.startsWith(tag));
+      });
+    }
+
+    function codexIsMeta(record) {
+      const top = record.type || "";
+      const payload = codexPayload(record);
+      const ptype = payload.type || "";
+      if (top === "session_meta" || top === "turn_context" || top === "compacted") return true;
+      if (top === "event_msg") {
+        // agent_message commentary fragments break markdown (tables/code split
+        // across messages) and final_answer duplicates response_item.assistant.
+        // user_message duplicates response_item.user.
+        // task_complete.last_agent_message duplicates response_item.assistant.
+        if (ptype === "agent_message" || ptype === "user_message" || ptype === "task_complete") return true;
+        // token_count, task_started, context_compacted are pure status events.
+        if (ptype === "token_count" || ptype === "task_started" || ptype === "context_compacted") return true;
+        // patch_apply_end carries unique diff details — keep it visible.
+      }
+      if (top === "response_item" && ptype === "message" && payload.role === "developer") return true;
+      if (top === "response_item" && ptype === "message" && payload.role === "user" && codexUserMessageIsSystem(payload)) return true;
+      return false;
+    }
+
+    function codexIsThinkingOnly(record) {
+      const top = record.type || "";
+      const payload = codexPayload(record);
+      return top === "response_item" && payload.type === "reasoning";
+    }
+
+    function codexMajorPrompt(record) {
+      const top = record.type || "";
+      const payload = codexPayload(record);
+      if (top === "event_msg" && payload.type === "user_message") {
+        const text = String(payload.message || "").trim();
+        if (!text) return false;
+        // Skip pure environment/context wrappers that Codex emits as user_message.
+        if (text.startsWith("<environment_context>")) return false;
+        return true;
+      }
+      return false;
+    }
+
+    function codexTurnId(record) {
+      const payload = codexPayload(record);
+      return payload.turn_id || (payload.metadata && payload.metadata.turn_id) || "";
+    }
+
+    function normalizeCodexRecord(record, lineNumber, raw) {
+      const kind = codexRoleKind(record);
+      const blocks = codexBlocks(record);
+      const types = blocks.map((b) => b && b.type).filter(Boolean);
+      const strings = collectStrings(record, []);
+      // Also index parsed function arguments so tool inputs are searchable.
+      const payload = codexPayload(record);
+      if (typeof payload.arguments === "string") {
+        try { collectStrings(JSON.parse(payload.arguments), strings); } catch { strings.push(payload.arguments); }
+      }
+      strings.push("line:" + lineNumber);
+      return {
+        raw,
+        record,
+        lineNumber,
+        kind,
+        blocks,
+        blockTypes: types,
+        format: "codex",
+        isMeta: codexIsMeta(record),
+        isThinkingOnly: codexIsThinkingOnly(record),
+        majorPrompt: codexMajorPrompt(record),
+        searchText: strings.join("\n").toLowerCase(),
+        turnId: 0,
+        codexTurnId: codexTurnId(record)
+      };
+    }
+
     function normalizeRecord(record, lineNumber, raw) {
       const kind = roleKind(record);
       const blocks = contentBlocks(record);
@@ -1365,7 +1642,9 @@
         record,
         lineNumber,
         kind,
+        blocks,
         blockTypes: types,
+        format: "claude",
         isMeta: isMetaRecord(record),
         isThinkingOnly: isThinkingOnly(record),
         majorPrompt: isMajorUserPrompt(record),
@@ -1375,39 +1654,88 @@
     }
 
     function parseJsonl(text) {
+      const format = detectFormat(text);
       const lines = text.split(/\r?\n/);
       const rows = [];
       const errors = [];
-      for (let index = 0; index < lines.length; index++) {
-        const raw = lines[index];
-        if (!raw.trim()) continue;
-        try {
-          const record = JSON.parse(raw);
-          rows.push(normalizeRecord(record, index + 1, raw));
-        } catch (error) {
-          errors.push({ line: index + 1, message: error.message, raw });
+
+      if (format === "codex") {
+        // Two-pass: first collect commentary fragment texts from event_msg.agent_message
+        // (phase=commentary), then mark matching response_item.assistant messages as meta
+        // so only the final_answer per turn is rendered. Commentary fragments are streaming
+        // progress updates and would break markdown (tables/code split across messages).
+        const commentaryTexts = new Set();
+        const parsedRecords = [];
+        for (let index = 0; index < lines.length; index++) {
+          const raw = lines[index];
+          if (!raw.trim()) continue;
+          try {
+            const record = JSON.parse(raw);
+            parsedRecords.push({ record, lineNumber: index + 1, raw });
+            const payload = codexPayload(record);
+            if (record.type === "event_msg" && payload.type === "agent_message" && payload.phase === "commentary") {
+              const msg = String(payload.message || "").trim();
+              if (msg) commentaryTexts.add(msg);
+            }
+          } catch (error) {
+            errors.push({ line: index + 1, message: error.message, raw });
+          }
+        }
+        for (const item of parsedRecords) {
+          const event = normalizeCodexRecord(item.record, item.lineNumber, item.raw);
+          // Mark assistant response_items whose text matches a commentary fragment.
+          if (event.kind === "assistant" && !event.isMeta) {
+            const payload = codexPayload(item.record);
+            if (payload.type === "message" && payload.role === "assistant") {
+              const text = (event.blocks || []).map((b) => b.text || "").join("").trim();
+              if (text && commentaryTexts.has(text)) {
+                event.isMeta = true;
+                event.isCommentary = true;
+              }
+            }
+          }
+          rows.push(event);
+        }
+      } else {
+        for (let index = 0; index < lines.length; index++) {
+          const raw = lines[index];
+          if (!raw.trim()) continue;
+          try {
+            const record = JSON.parse(raw);
+            rows.push(normalizeRecord(record, index + 1, raw));
+          } catch (error) {
+            errors.push({ line: index + 1, message: error.message, raw });
+          }
         }
       }
+
       if (errors.length) {
         console.warn("JSONL parse errors", errors);
       }
-      return { rows, errors };
+      return { rows, errors, format };
     }
 
     function buildTurns(rows) {
       const turns = [];
       let current = null;
+      let nextId = 1;
 
       for (const event of rows) {
-        if (event.majorPrompt) {
+        const isCodexTaskStart = event.format === "codex" && event.record.type === "event_msg" && codexPayload(event.record).type === "task_started";
+        const startsTurn = event.majorPrompt || isCodexTaskStart;
+        if (startsTurn) {
           current = {
-            id: turns.length + 1,
+            id: nextId++,
             lineNumber: event.lineNumber,
             timestamp: event.record.timestamp || "",
-            title: summarize(event.record.message.content, 130),
+            title: summarize(event.format === "codex" ? codexTurnTitle(event.record) : event.record.message.content, 130),
             count: 0
           };
           turns.push(current);
+        } else if (current && event.format === "codex" && event.majorPrompt && current.title === "task started") {
+          // A user_message right after task_started carries the real prompt text.
+          current.title = summarize(codexTurnTitle(event.record), 130);
+          current.lineNumber = event.lineNumber;
         }
 
         if (!current) {
@@ -1421,11 +1749,18 @@
       return turns;
     }
 
+    function codexTurnTitle(record) {
+      const payload = codexPayload(record);
+      if (record.type === "event_msg" && payload.type === "user_message") return payload.message || "";
+      if (record.type === "event_msg" && payload.type === "task_started") return "task started";
+      return "";
+    }
+
     function toolMap(rows) {
       const map = new Map();
       for (const event of rows) {
-        if (event.record.type !== "assistant") continue;
-        for (const block of contentBlocks(event.record)) {
+        const blocks = event.blocks || contentBlocks(event.record);
+        for (const block of blocks) {
           if (block && block.type === "tool_use" && block.id) {
             map.set(block.id, {
               name: block.name || "tool",
@@ -1440,6 +1775,7 @@
 
     function loadText(text, name) {
       const parsed = parseJsonl(text);
+      state.format = parsed.format || "claude";
       state.rows = parsed.rows;
       state.events = parsed.rows;
       state.turns = buildTurns(state.events);
@@ -1449,9 +1785,10 @@
 
       const firstTitle = state.events.find((event) => event.record.type === "ai-title" && event.record.aiTitle);
       const title = firstTitle ? firstTitle.record.aiTitle : state.sourceName;
+      const fmtLabel = state.format === "codex" ? "Codex CLI" : "Claude Code";
       el.statusLine.textContent = parsed.errors.length
         ? "Loaded with " + parsed.errors.length + " parse errors. Valid records are shown."
-        : "Loaded " + state.events.length + " records from " + state.sourceName + ".";
+        : "Loaded " + state.events.length + " " + fmtLabel + " records from " + state.sourceName + ".";
     }
 
     async function loadUrl(src) {
@@ -1562,8 +1899,14 @@
         '<span class="badge">' + escapeHtml(record.type || "unknown") + "</span>"
       ];
       if (record.subtype) bits.push('<span class="badge">' + escapeHtml(record.subtype) + "</span>");
-      if (record.uuid) bits.push('<span class="badge">uuid ' + escapeHtml(shortId(record.uuid)) + "</span>");
-      if (record.promptId) bits.push('<span class="badge">prompt ' + escapeHtml(shortId(record.promptId)) + "</span>");
+      if (event.format === "codex") {
+        const ptype = codexPayload(record).type;
+        if (ptype && ptype !== record.type) bits.push('<span class="badge">' + escapeHtml(ptype) + "</span>");
+        if (event.codexTurnId) bits.push('<span class="badge">turn ' + escapeHtml(shortId(event.codexTurnId)) + "</span>");
+      } else {
+        if (record.uuid) bits.push('<span class="badge">uuid ' + escapeHtml(shortId(record.uuid)) + "</span>");
+        if (record.promptId) bits.push('<span class="badge">prompt ' + escapeHtml(shortId(record.promptId)) + "</span>");
+      }
       if (event.turnId) bits.push('<span class="badge">turn ' + event.turnId + "</span>");
       const time = formatTime(record.timestamp);
       const copyButton = '<button class="icon-button copy-card-button" type="button" data-copy-line="' + event.lineNumber + '" aria-label="Copy card content" title="Copy card content">' + clipboardIcon + "</button>";
@@ -1656,7 +1999,7 @@
     }
 
     function renderAssistant(event, f) {
-      const blocks = contentBlocks(event.record);
+      const blocks = event.blocks || contentBlocks(event.record);
       if (!blocks.length) return renderJsonDetails(event.record.message || event.record, "Message");
 
       return blocks.map((block) => {
@@ -1682,16 +2025,17 @@
     function renderUser(event, f) {
       const record = event.record;
       const content = record.message && record.message.content;
-      if (Array.isArray(content)) {
-        return content.map((block) => {
-          if (block && block.type === "tool_result") return renderToolResult(block, f.expandOutputs);
-          if (block && block.type === "text") return '<div class="block">' + formatMarkdown(block.text || "") + "</div>";
-          return renderJsonDetails(block, "User block");
-        }).join("");
-      }
       if (isTaskNotificationText(content)) return renderTaskNotification(content);
-      if (typeof content === "string") return '<div class="block">' + formatMarkdown(content) + "</div>";
-      return renderJsonDetails(record.message || record, "User message");
+      const blocks = event.blocks || contentBlocks(record);
+      if (!blocks.length) {
+        if (typeof content === "string") return '<div class="block">' + formatMarkdown(content) + "</div>";
+        return renderJsonDetails(record.message || record, "User message");
+      }
+      return blocks.map((block) => {
+        if (block && block.type === "tool_result") return renderToolResult(block, f.expandOutputs);
+        if (block && block.type === "text") return '<div class="block">' + formatMarkdown(block.text || "") + "</div>";
+        return renderJsonDetails(block, "User block");
+      }).join("");
     }
 
     function renderAttachment(record, f) {
@@ -1725,17 +2069,246 @@
       ].join("");
     }
 
-    function renderEvent(event, f) {
+    function renderClaudeEvent(event, f) {
       const record = event.record;
-      let body = "";
-      if (record.type === "assistant") body = renderAssistant(event, f);
-      else if (record.type === "user") body = renderUser(event, f);
-      else if (record.type === "attachment") body = renderAttachment(record, f);
-      else if (record.type === "system") body = renderSystem(record);
-      else if (record.type === "ai-title") body = '<div class="block">' + formatMarkdown(record.aiTitle || "") + "</div>";
-      else body = renderJsonDetails(record, "Raw record");
+      if (record.type === "assistant") return renderAssistant(event, f);
+      if (record.type === "user") return renderUser(event, f);
+      if (record.type === "attachment") return renderAttachment(record, f);
+      if (record.type === "system") return renderSystem(record);
+      if (record.type === "ai-title") return '<div class="block">' + formatMarkdown(record.aiTitle || "") + "</div>";
+      return renderJsonDetails(record, "Raw record");
+    }
 
-      if (!body.trim()) body = '<div class="preview">(hidden by current block settings)</div>';
+    function codexInputSummary(name, input) {
+      if (input == null) return "";
+      if (typeof input === "string") return summarize(input, 140);
+      if (typeof input !== "object") return String(input);
+      if (name === "exec_command") {
+        return input.command || input.cmd || (Array.isArray(input.args) ? input.args.join(" ") : "") || "";
+      }
+      if (name === "update_plan") {
+        if (Array.isArray(input.plan)) return input.plan.length + " steps";
+        return "";
+      }
+      if (name === "spawn_agent" || name === "wait_agent" || name === "close_agent") {
+        return input.agent_nickname || input.nickname || input.agent || "";
+      }
+      if (name === "write_stdin") return summarize(input.input || input.text || "", 140);
+      if (name === "apply_patch") return summarize(String(input).slice(0, 400), 140);
+      if (name === "tool_search") return input.query || "";
+      const pairs = Object.entries(input).slice(0, 3).map(([key, value]) => key + "=" + summarize(value, 60));
+      return pairs.join(" | ");
+    }
+
+    function renderCodexSessionMeta(payload) {
+      const bits = [];
+      if (payload.cwd) bits.push(["cwd", payload.cwd]);
+      if (payload.cli_version) bits.push(["cli_version", payload.cli_version]);
+      if (payload.agent_nickname) bits.push(["agent", payload.agent_nickname]);
+      if (payload.model_provider) bits.push(["provider", payload.model_provider]);
+      if (payload.thread_source) bits.push(["thread", payload.thread_source]);
+      if (payload.originator) bits.push(["originator", payload.originator]);
+      const git = payload.git || {};
+      if (git.branch) bits.push(["branch", git.branch]);
+      if (git.commit_hash) bits.push(["commit", String(git.commit_hash).slice(0, 12)]);
+      if (git.repository_url) bits.push(["repo", git.repository_url]);
+      const dl = bits.map(([k, v]) => "<dt>" + escapeHtml(k) + "</dt><dd>" + escapeHtml(String(v)) + "</dd>").join("");
+      let body = '<dl class="kv">' + dl + "</dl>";
+      if (payload.base_instructions && payload.base_instructions.text) {
+        body += '<details class="block"><summary>base_instructions</summary><div class="details-body"><pre><code>' + escapeHtml(payload.base_instructions.text) + "</code></pre></div></details>";
+      }
+      return '<div class="block">' + body + "</div>";
+    }
+
+    function renderCodexTurnContext(payload) {
+      const bits = [];
+      if (payload.model) bits.push(["model", payload.model]);
+      if (payload.personality) bits.push(["personality", payload.personality]);
+      if (payload.approval_policy) bits.push(["approval", payload.approval_policy]);
+      if (payload.sandbox_policy && payload.sandbox_policy.type) bits.push(["sandbox", payload.sandbox_policy.type]);
+      if (payload.current_date) bits.push(["date", payload.current_date]);
+      if (payload.timezone) bits.push(["tz", payload.timezone]);
+      const dl = bits.map(([k, v]) => "<dt>" + escapeHtml(k) + "</dt><dd>" + escapeHtml(String(v)) + "</dd>").join("");
+      return '<div class="block"><dl class="kv">' + dl + "</dl></div>";
+    }
+
+    function renderCodexTaskStarted(payload) {
+      const bits = [];
+      if (payload.turn_id) bits.push(["turn", shortId(payload.turn_id)]);
+      if (payload.model_context_window) bits.push(["context window", payload.model_context_window.toLocaleString()]);
+      if (payload.collaboration_mode_kind) bits.push(["mode", payload.collaboration_mode_kind]);
+      const dl = bits.map(([k, v]) => "<dt>" + escapeHtml(k) + "</dt><dd>" + escapeHtml(String(v)) + "</dd>").join("");
+      return '<div class="block"><div class="preview">Task started</div><dl class="kv">' + dl + "</dl></div>";
+    }
+
+    function renderCodexTaskComplete(payload) {
+      const msg = payload.last_agent_message || "";
+      if (!msg.trim()) return '<div class="block"><div class="preview">Task complete</div></div>';
+      return '<div class="block"><div class="preview">Task complete</div>' + formatMarkdown(msg) + "</div>";
+    }
+
+    function renderCodexAgentMessage(payload) {
+      const phase = payload.phase || "";
+      const text = payload.message || "";
+      const phaseBadge = phase ? ' <span class="badge">' + escapeHtml(phase) + "</span>" : "";
+      if (!text.trim()) return '<div class="block"><div class="preview">agent message' + phaseBadge + "</div></div>";
+      return '<div class="block">' + phaseBadge + formatMarkdown(text) + "</div>";
+    }
+
+    function renderCodexReasoning(payload, f) {
+      if (!f.showThinking) return "";
+      const summary = Array.isArray(payload.summary)
+        ? payload.summary.map((s) => (s && s.text) || "").filter(Boolean).join("\n")
+        : "";
+      const enc = payload.encrypted_content || "";
+      if (summary.trim()) {
+        return '<details class="block" open><summary>Reasoning</summary><div class="details-body">' + formatMarkdown(summary) + "</div></details>";
+      }
+      const note = enc
+        ? "No readable reasoning text is stored in this transcript block. Codex recorded only an encrypted payload (" + enc.length.toLocaleString() + " chars)."
+        : "No readable reasoning text is stored in this transcript block.";
+      return '<details class="block" open><summary>Reasoning unavailable</summary><div class="details-body"><div class="preview">' + escapeHtml(note) + "</div></div></details>";
+    }
+
+    function renderCodexMessage(event, payload, f) {
+      const role = payload.role || "user";
+      const blocks = event.blocks || [];
+      if (!blocks.length) return renderJsonDetails(payload, "Codex message");
+      if (role === "developer") {
+        const text = blocks.map((b) => b.text || "").join("\n");
+        return '<details class="block"><summary>developer instructions</summary><div class="details-body">' + formatMarkdown(text) + "</div></details>";
+      }
+      return blocks.map((block) => {
+        if (block && block.type === "text") return '<div class="block">' + formatMarkdown(block.text || "") + "</div>";
+        return renderJsonDetails(block, "Codex message block");
+      }).join("");
+    }
+
+    function renderCodexToolCall(event, payload, ptype) {
+      const name = payload.name || (ptype === "tool_search_call" ? "tool_search" : "tool");
+      const callId = payload.call_id || "";
+      let input = payload.input;
+      if (input === undefined) {
+        try { input = JSON.parse(payload.arguments || "{}"); } catch { input = { _raw: payload.arguments || "" }; }
+      }
+      const summary = codexInputSummary(name, input);
+      const json = typeof input === "string" ? input : prettyJson(input);
+      return [
+        '<div class="tool-card block">',
+        '<div class="tool-title">',
+        '<span class="badge role-tool">' + escapeHtml(ptype) + "</span>",
+        "<strong>" + escapeHtml(name) + "</strong>",
+        callId ? '<span class="badge">' + escapeHtml(shortId(callId)) + "</span>" : "",
+        "</div>",
+        summary ? '<div class="preview">' + escapeHtml(summary) + "</div>" : "",
+        "<details>",
+        "<summary>Input</summary>",
+        '<div class="details-body"><pre><code>' + escapeHtml(json) + "</code></pre></div>",
+        "</details>",
+        "</div>"
+      ].join("");
+    }
+
+    function renderCodexToolOutput(event, payload, f) {
+      const callId = payload.call_id || "";
+      const tool = state.toolUses && callId ? state.toolUses.get(callId) : null;
+      const label = tool ? tool.name : "tool_output";
+      let content = payload.output;
+      if (content == null) content = "";
+      if (typeof content !== "string") content = prettyJson(content);
+      const preview = summarize(content, 240);
+      const openAttr = f.expandOutputs || content.length < 900 ? " open" : "";
+      return [
+        '<details class="block tool-output"' + openAttr + ">",
+        "<summary>",
+        '<span class="ok">' + escapeHtml(label) + "</span>",
+        callId ? ' <span class="badge">' + escapeHtml(shortId(callId)) + "</span>" : "",
+        "</summary>",
+        '<div class="details-body">',
+        '<div class="preview">' + escapeHtml(preview) + "</div>",
+        '<pre><code>' + escapeHtml(content) + "</code></pre>",
+        "</div>",
+        "</details>"
+      ].join("");
+    }
+
+    function renderCodexPatchApply(event, payload, f) {
+      const callId = payload.call_id || "";
+      const tool = state.toolUses && callId ? state.toolUses.get(callId) : null;
+      const label = tool ? tool.name : "apply_patch";
+      const success = payload.success !== false;
+      const stdout = payload.stdout || "";
+      const stderr = payload.stderr || "";
+      const changes = payload.changes || {};
+      const paths = Object.keys(changes);
+      const fileRows = paths.map((p) => {
+        const change = changes[p] || {};
+        const ctype = change.type || "change";
+        const cls = ctype === "add" ? "ok" : (ctype === "remove" ? "bad" : "");
+        return '<div class="preview"><span class="' + cls + '">' + escapeHtml(ctype) + "</span> " + escapeHtml(p) + "</div>";
+      }).join("");
+      const openAttr = f.expandOutputs ? " open" : "";
+      let body = "";
+      if (stdout.trim()) body += '<div class="preview">' + escapeHtml(summarize(stdout, 240)) + "</div>";
+      if (stderr.trim()) body += '<div class="preview bad">' + escapeHtml(summarize(stderr, 240)) + "</div>";
+      if (fileRows) body += '<div class="patch-files">' + fileRows + "</div>";
+      const diffBlocks = paths.map((p) => {
+        const change = changes[p] || {};
+        const diff = change.unified_diff || change.content || "";
+        if (!diff || typeof diff !== "string") return "";
+        return '<details><summary>' + escapeHtml(p) + '</summary><div class="details-body"><pre><code>' + escapeHtml(diff) + '</code></pre></div></details>';
+      }).join("");
+      if (diffBlocks) body += '<div class="patch-diffs">' + diffBlocks + "</div>";
+      return [
+        '<details class="block tool-output"' + openAttr + ">",
+        "<summary>",
+        '<span class="' + (success ? "ok" : "bad") + '">' + escapeHtml(label) + "</span>",
+        callId ? ' <span class="badge">' + escapeHtml(shortId(callId)) + "</span>" : "",
+        ' <span class="badge">' + paths.length + " file" + (paths.length === 1 ? "" : "s") + "</span>",
+        "</summary>",
+        '<div class="details-body">' + body + "</div>",
+        "</details>"
+      ].join("");
+    }
+
+    function renderCodexEvent(event, f) {
+      const record = event.record;
+      const top = record.type || "";
+      const payload = codexPayload(record);
+      const ptype = payload.type || "";
+
+      if (top === "session_meta") return renderCodexSessionMeta(payload);
+      if (top === "turn_context") return renderCodexTurnContext(payload);
+      if (top === "compacted" || (top === "event_msg" && ptype === "context_compacted")) {
+        return '<div class="block"><div class="preview">Context compacted.</div></div>';
+      }
+      if (top === "event_msg") {
+        if (ptype === "task_started") return renderCodexTaskStarted(payload);
+        if (ptype === "token_count") return "";
+        if (ptype === "task_complete") return renderCodexTaskComplete(payload);
+        if (ptype === "patch_apply_end") return renderCodexPatchApply(event, payload, f);
+        if (ptype === "user_message") return '<div class="block">' + formatMarkdown(payload.message || "") + "</div>";
+        if (ptype === "agent_message") return renderCodexAgentMessage(payload);
+      }
+      if (top === "response_item") {
+        if (ptype === "message") return renderCodexMessage(event, payload, f);
+        if (ptype === "reasoning") return renderCodexReasoning(payload, f);
+        if (ptype === "function_call" || ptype === "custom_tool_call" || ptype === "tool_search_call") {
+          return renderCodexToolCall(event, payload, ptype);
+        }
+        if (ptype === "function_call_output" || ptype === "custom_tool_call_output" || ptype === "tool_search_output") {
+          return renderCodexToolOutput(event, payload, f);
+        }
+      }
+      return renderJsonDetails(record, "Raw Codex record");
+    }
+
+    function renderEvent(event, f) {
+      let body;
+      if (event.format === "codex") body = renderCodexEvent(event, f);
+      else body = renderClaudeEvent(event, f);
+
+      if (!body || !body.trim()) body = '<div class="preview">(hidden by current block settings)</div>';
 
       const classes = ["event", event.kind];
       if (event.isMeta) classes.push("meta");
@@ -1758,43 +2331,80 @@
       let cacheCreationTokens = 0;
       let cacheReadTokens = 0;
       let outputTokens = 0;
+      let reasoningTokens = 0;
 
       for (const event of state.events) {
         counts.set(event.record.type, (counts.get(event.record.type) || 0) + 1);
-        if (event.kind === "tool-call") toolCalls += contentBlocks(event.record).filter((block) => block && block.type === "tool_use").length;
-        if (event.kind === "tool-result") {
-          const content = event.record.message && event.record.message.content;
-          toolResults += Array.isArray(content) ? content.filter((block) => block && block.type === "tool_result").length : 0;
-        }
-        const usage = event.record.message && event.record.message.usage;
-        if (usage) {
-          const usageKey = event.record.requestId || event.record.uuid || ("line:" + event.lineNumber);
-          if (seenUsage.has(usageKey)) continue;
-          seenUsage.add(usageKey);
-          usageCalls += 1;
-          rawInputTokens += Number(usage.input_tokens || 0);
-          cacheCreationTokens += Number(usage.cache_creation_input_tokens || 0);
-          cacheReadTokens += Number(usage.cache_read_input_tokens || 0);
-          outputTokens += Number(usage.output_tokens || 0);
+        const blocks = event.blocks || contentBlocks(event.record);
+        if (event.kind === "tool-call") toolCalls += blocks.filter((block) => block && block.type === "tool_use").length;
+        if (event.kind === "tool-result") toolResults += blocks.filter((block) => block && block.type === "tool_result").length;
+
+        if (state.format === "codex") {
+          // Codex token usage lives in event_msg token_count payloads.
+          if (event.record.type === "event_msg" && codexPayload(event.record).type === "token_count") {
+            const info = codexPayload(event.record).info || {};
+            const last = info.last_token_usage || info.total_token_usage || {};
+            const turnId = event.codexTurnId || ("line:" + event.lineNumber);
+            // Use last_token_usage (per-response delta) when available; dedupe by turn.
+            if (seenUsage.has(turnId)) {
+              // Keep the latest per turn by overwriting: subtract then re-add below.
+            }
+            const usageKey = turnId;
+            if (!seenUsage.has(usageKey)) {
+              seenUsage.add(usageKey);
+              usageCalls += 1;
+              rawInputTokens += Number(last.input_tokens || 0);
+              cacheReadTokens += Number(last.cached_input_tokens || 0);
+              outputTokens += Number(last.output_tokens || 0);
+              reasoningTokens += Number(last.reasoning_output_tokens || 0);
+            }
+          }
+        } else {
+          const usage = event.record.message && event.record.message.usage;
+          if (usage) {
+            const usageKey = event.record.requestId || event.record.uuid || ("line:" + event.lineNumber);
+            if (seenUsage.has(usageKey)) continue;
+            seenUsage.add(usageKey);
+            usageCalls += 1;
+            rawInputTokens += Number(usage.input_tokens || 0);
+            cacheCreationTokens += Number(usage.cache_creation_input_tokens || 0);
+            cacheReadTokens += Number(usage.cache_read_input_tokens || 0);
+            outputTokens += Number(usage.output_tokens || 0);
+          }
         }
       }
 
       const totalInputTokens = rawInputTokens + cacheCreationTokens + cacheReadTokens;
-      el.stats.innerHTML = [
+      const statCards = [
         statCard(state.events.length, "records"),
         statCard(state.turns.length, "turns"),
         statCard(toolCalls, "tool calls"),
-        statCard(visibleCount, "visible"),
-        statCard(usageCalls, "usage calls", "Unique assistant requestId values with message.usage"),
-        statCard(totalInputTokens, "input+cache", "input_tokens + cache_creation_input_tokens + cache_read_input_tokens, de-duplicated by requestId"),
-        statCard(outputTokens, "output tokens", "output_tokens, de-duplicated by requestId"),
-        statCard(cacheReadTokens, "cache read", "cache_read_input_tokens, de-duplicated by requestId"),
-        statCard(cacheCreationTokens, "cache create", "cache_creation_input_tokens, de-duplicated by requestId"),
-        statCard(rawInputTokens, "raw input", "input_tokens only, de-duplicated by requestId")
-      ].join("");
+        statCard(visibleCount, "visible")
+      ];
+      if (state.format === "codex") {
+        statCards.push(
+          statCard(usageCalls, "token reports", "token_count events, de-duplicated by turn_id"),
+          statCard(totalInputTokens, "input+cache", "input_tokens + cached_input_tokens, summed per turn"),
+          statCard(outputTokens, "output tokens", "output_tokens, summed per turn"),
+          statCard(reasoningTokens, "reasoning", "reasoning_output_tokens, summed per turn"),
+          statCard(cacheReadTokens, "cached input", "cached_input_tokens, summed per turn"),
+          statCard(rawInputTokens, "raw input", "input_tokens only, summed per turn")
+        );
+      } else {
+        statCards.push(
+          statCard(usageCalls, "usage calls", "Unique assistant requestId values with message.usage"),
+          statCard(totalInputTokens, "input+cache", "input_tokens + cache_creation_input_tokens + cache_read_input_tokens, de-duplicated by requestId"),
+          statCard(outputTokens, "output tokens", "output_tokens, de-duplicated by requestId"),
+          statCard(cacheReadTokens, "cache read", "cache_read_input_tokens, de-duplicated by requestId"),
+          statCard(cacheCreationTokens, "cache create", "cache_creation_input_tokens, de-duplicated by requestId"),
+          statCard(rawInputTokens, "raw input", "input_tokens only, de-duplicated by requestId")
+        );
+      }
+      el.stats.innerHTML = statCards.join("");
 
       const titleBits = [];
       if (state.sourceName) titleBits.push(state.sourceName);
+      if (state.format) titleBits.push(state.format === "codex" ? "Codex CLI" : "Claude Code");
       if (toolResults) titleBits.push(toolResults.toLocaleString() + " tool results");
       if (counts.size) titleBits.push([...counts.entries()].map(([key, value]) => key + ":" + value).join(" "));
       if (titleBits.length) el.statusLine.textContent = titleBits.join(" | ");
@@ -1844,6 +2454,19 @@
       if (block.type === "text") return block.text || "";
       if (block.type === "tool_use") return "TOOL " + (block.name || "") + "\n" + prettyJson(block.input || {});
       if (block.type === "tool_result") {
+        if (block._patch) {
+          const p = block._patch;
+          let out = (p.stdout || "").trim();
+          if (p.stderr && p.stderr.trim()) out += (out ? "\n" : "") + "[stderr] " + p.stderr.trim();
+          const paths = Object.keys(p.changes || {});
+          if (paths.length) out += (out ? "\n" : "") + "Files: " + paths.join(", ");
+          for (const path of paths) {
+            const ch = p.changes[path] || {};
+            const diff = ch.unified_diff || ch.content || "";
+            if (diff && typeof diff === "string") out += "\n\n--- " + path + " ---\n" + diff;
+          }
+          return out;
+        }
         const content = block.content;
         if (content == null) return "";
         return typeof content === "string" ? content : prettyJson(content);
@@ -1852,14 +2475,40 @@
       return prettyJson(block);
     }
 
+    function codexEventContentText(event) {
+      const record = event.record;
+      const payload = codexPayload(record);
+      const top = record.type || "";
+      const ptype = payload.type || "";
+      const blocks = event.blocks || [];
+      const fromBlocks = blocks.map(blockContentText).filter(Boolean).join("\n\n").trim();
+      if (fromBlocks) return fromBlocks;
+      if (top === "event_msg" && ptype === "task_started") return "Task started";
+      if (top === "event_msg" && ptype === "token_count") {
+        const info = payload.info || {};
+        const t = info.total_token_usage || {};
+        return "token_count: input=" + (t.input_tokens || 0) + " cached=" + (t.cached_input_tokens || 0) + " output=" + (t.output_tokens || 0) + " reasoning=" + (t.reasoning_output_tokens || 0);
+      }
+      if (top === "compacted" || (top === "event_msg" && ptype === "context_compacted")) return "Context compacted.";
+      if (top === "turn_context") {
+        return "turn_context: model=" + (payload.model || "?") + " turn=" + shortId(payload.turn_id || "");
+      }
+      if (top === "session_meta") {
+        const git = payload.git || {};
+        return "session " + (payload.id || "") + " cwd=" + (payload.cwd || "") + " cli=" + (payload.cli_version || "") + " branch=" + (git.branch || "");
+      }
+      return prettyJson(record);
+    }
+
     function eventContentText(event) {
+      if (event.format === "codex") return codexEventContentText(event);
       const record = event.record;
       const content = record.message && record.message.content;
       if (record.type === "user" && isTaskNotificationText(content)) {
         return extractTagText(content, "summary") || content;
       }
       if (record.type === "assistant" || record.type === "user") {
-        return contentBlocks(record).map(blockContentText).filter(Boolean).join("\n\n").trim();
+        return (event.blocks || contentBlocks(record)).map(blockContentText).filter(Boolean).join("\n\n").trim();
       }
       if (record.type === "attachment") {
         const attachment = record.attachment || {};
@@ -1880,7 +2529,8 @@
 
     function exportEventText(event) {
       const record = event.record;
-      const head = "[" + event.lineNumber + "] " + (record.timestamp || "") + " " + event.kind + " " + (record.uuid || "");
+      const id = event.format === "codex" ? (event.codexTurnId || "") : (record.uuid || "");
+      const head = "[" + event.lineNumber + "] " + (record.timestamp || "") + " " + event.kind + (id ? " " + id : "");
       return head + "\n" + eventContentText(event);
     }
 
@@ -1897,7 +2547,7 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "claude-session-visible.jsonl";
+      a.download = (state.format === "codex" ? "codex-session-visible.jsonl" : "claude-session-visible.jsonl");
       document.body.appendChild(a);
       a.click();
       a.remove();
