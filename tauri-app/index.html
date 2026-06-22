@@ -692,6 +692,47 @@
       margin-bottom: 0;
     }
 
+    .image-block {
+      display: grid;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-soft);
+      padding: 10px;
+    }
+
+    .image-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .image-title strong {
+      color: var(--ink);
+      font-size: 13px;
+    }
+
+    .session-image {
+      display: block;
+      width: auto;
+      max-width: min(100%, 860px);
+      max-height: 560px;
+      object-fit: contain;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel);
+    }
+
+    .image-path {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
+
     .md {
       overflow-wrap: anywhere;
     }
@@ -1683,7 +1724,8 @@
     function collectStrings(value, out = []) {
       if (value == null) return out;
       if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-        out.push(String(value));
+        const text = String(value);
+        out.push(isImageDataUrl(text) ? "image data" : text);
         return out;
       }
       if (Array.isArray(value)) {
@@ -1800,6 +1842,31 @@
       return (record && record.payload) || {};
     }
 
+    function isImageDataUrl(value) {
+      return typeof value === "string" && /^data:image\/[a-z0-9.+-]+;base64,/i.test(value);
+    }
+
+    function isSupportedInlineImageUrl(value) {
+      return typeof value === "string" && /^data:image\/(?:png|jpe?g|gif|webp);base64,/i.test(value);
+    }
+
+    function parseCodexImageTag(text) {
+      const trimmed = String(text || "").trim();
+      const match = /^<image\b([^>]*)>$/.exec(trimmed);
+      if (!match) return null;
+      const attrs = match[1] || "";
+      const nameMatch = /\bname=(?:"([^"]*)"|(.+?)(?=\s+\w+=|$))/.exec(attrs);
+      const pathMatch = /\bpath=(?:"([^"]*)"|(.+?)(?=\s+\w+=|$))/.exec(attrs);
+      return {
+        name: ((nameMatch && (nameMatch[1] || nameMatch[2])) || "").trim(),
+        path: ((pathMatch && (pathMatch[1] || pathMatch[2])) || "").trim()
+      };
+    }
+
+    function isCodexImageCloseTag(text) {
+      return /^<\/image>$/.test(String(text || "").trim());
+    }
+
     function codexBlocks(record) {
       // Normalize a Codex record into Claude-compatible blocks so existing
       // render helpers can be reused. Codex-specific extras are carried under
@@ -1812,13 +1879,40 @@
         if (ptype === "message") {
           const role = payload.role || "unknown";
           const content = Array.isArray(payload.content) ? payload.content : [];
-          return content.map((item) => {
-            if (!item || typeof item !== "object") return { type: "text", text: "", _role: role };
-            if (item.type === "input_text" || item.type === "output_text" || item.type === "text") {
-              return { type: "text", text: item.text || "", _role: role };
+          const blocks = [];
+          let pendingImageMeta = null;
+          for (const item of content) {
+            if (!item || typeof item !== "object") {
+              blocks.push({ type: "text", text: "", _role: role });
+              continue;
             }
-            return { type: "text", text: prettyJson(item), _role: role };
-          });
+            if (item.type === "input_text" || item.type === "output_text" || item.type === "text") {
+              const text = item.text || "";
+              const imageMeta = parseCodexImageTag(text);
+              if (imageMeta) {
+                pendingImageMeta = imageMeta;
+                continue;
+              }
+              if (isCodexImageCloseTag(text)) continue;
+              blocks.push({ type: "text", text, _role: role });
+              continue;
+            }
+            if (item.type === "input_image") {
+              const meta = pendingImageMeta || {};
+              blocks.push({
+                type: "image",
+                image_url: item.image_url || "",
+                detail: item.detail || "",
+                name: meta.name || "",
+                path: meta.path || "",
+                _role: role
+              });
+              pendingImageMeta = null;
+              continue;
+            }
+            blocks.push({ type: "text", text: prettyJson(item), _role: role });
+          }
+          return blocks;
         }
         if (ptype === "function_call") {
           let input;
@@ -2363,6 +2457,31 @@
       ].join("");
     }
 
+    function renderImageBlock(block) {
+      const src = block && block.image_url;
+      const name = (block && block.name) || "Image";
+      const detail = block && block.detail ? String(block.detail) : "";
+      const path = block && block.path ? String(block.path) : "";
+      if (!isSupportedInlineImageUrl(src)) {
+        return [
+          '<details class="block" open>',
+          "<summary>" + escapeHtml(name) + "</summary>",
+          '<div class="details-body"><div class="preview">Unsupported or unsafe inline image data.</div></div>',
+          "</details>"
+        ].join("");
+      }
+      return [
+        '<figure class="image-block block">',
+        '<figcaption class="image-title">',
+        "<strong>" + escapeHtml(name) + "</strong>",
+        detail ? '<span class="badge">' + escapeHtml(detail) + "</span>" : "",
+        "</figcaption>",
+        '<img class="session-image" src="' + escapeHtml(src) + '" alt="' + escapeHtml(name) + '" loading="lazy" decoding="async">',
+        path ? '<div class="image-path">' + escapeHtml(path) + "</div>" : "",
+        "</figure>"
+      ].join("");
+    }
+
     function renderAssistant(event, f) {
       const blocks = event.blocks || contentBlocks(event.record);
       if (!blocks.length) return renderJsonDetails(event.record.message || event.record, "Message");
@@ -2370,6 +2489,7 @@
       return blocks.map((block) => {
         if (!block || typeof block !== "object") return "";
         if (block.type === "text") return '<div class="block">' + formatMarkdown(block.text || "") + "</div>";
+        if (block.type === "image") return renderImageBlock(block);
         if (block.type === "tool_use") return renderToolUse(block);
         if (block.type === "thinking") {
           if (!f.showThinking) return "";
@@ -2399,6 +2519,7 @@
       return blocks.map((block) => {
         if (block && block.type === "tool_result") return renderToolResult(block, f.expandOutputs);
         if (block && block.type === "text") return '<div class="block">' + formatMarkdown(block.text || "") + "</div>";
+        if (block && block.type === "image") return renderImageBlock(block);
         return renderJsonDetails(block, "User block");
       }).join("");
     }
@@ -2545,6 +2666,7 @@
       }
       return blocks.map((block) => {
         if (block && block.type === "text") return '<div class="block">' + formatMarkdown(block.text || "") + "</div>";
+        if (block && block.type === "image") return renderImageBlock(block);
         return renderJsonDetails(block, "Codex message block");
       }).join("");
     }
@@ -2709,20 +2831,11 @@
           if (event.record.type === "event_msg" && codexPayload(event.record).type === "token_count") {
             const info = codexPayload(event.record).info || {};
             const last = info.last_token_usage || info.total_token_usage || {};
-            const turnId = event.codexTurnId || ("line:" + event.lineNumber);
-            // Use last_token_usage (per-response delta) when available; dedupe by turn.
-            if (seenUsage.has(turnId)) {
-              // Keep the latest per turn by overwriting: subtract then re-add below.
-            }
-            const usageKey = turnId;
-            if (!seenUsage.has(usageKey)) {
-              seenUsage.add(usageKey);
-              usageCalls += 1;
-              rawInputTokens += Number(last.input_tokens || 0);
-              cacheReadTokens += Number(last.cached_input_tokens || 0);
-              outputTokens += Number(last.output_tokens || 0);
-              reasoningTokens += Number(last.reasoning_output_tokens || 0);
-            }
+            usageCalls += 1;
+            rawInputTokens += Number(last.input_tokens || 0);
+            cacheReadTokens += Number(last.cached_input_tokens || 0);
+            outputTokens += Number(last.output_tokens || 0);
+            reasoningTokens += Number(last.reasoning_output_tokens || 0);
           }
         } else {
           const usage = event.record.message && event.record.message.usage;
@@ -2748,12 +2861,12 @@
       ];
       if (state.format === "codex") {
         statCards.push(
-          statCard(usageCalls, "token reports", "token_count events, de-duplicated by turn_id"),
-          statCard(totalInputTokens, "input+cache", "input_tokens + cached_input_tokens, summed per turn"),
-          statCard(outputTokens, "output tokens", "output_tokens, summed per turn"),
-          statCard(reasoningTokens, "reasoning", "reasoning_output_tokens, summed per turn"),
-          statCard(cacheReadTokens, "cached input", "cached_input_tokens, summed per turn"),
-          statCard(rawInputTokens, "raw input", "input_tokens only, summed per turn")
+          statCard(usageCalls, "token reports", "token_count events included in totals"),
+          statCard(totalInputTokens, "input+cache", "input_tokens + cached_input_tokens, summed from last_token_usage"),
+          statCard(outputTokens, "output tokens", "output_tokens, summed from last_token_usage"),
+          statCard(reasoningTokens, "reasoning", "reasoning_output_tokens, summed from last_token_usage"),
+          statCard(cacheReadTokens, "cached input", "cached_input_tokens, summed from last_token_usage"),
+          statCard(rawInputTokens, "raw input", "input_tokens only, summed from last_token_usage")
         );
       } else {
         statCards.push(
@@ -2837,6 +2950,12 @@
         return typeof content === "string" ? content : prettyJson(content);
       }
       if (block.type === "thinking") return block.thinking || block.text || "";
+      if (block.type === "image") {
+        const label = block.name || "Image";
+        const path = block.path ? " " + block.path : "";
+        const detail = block.detail ? " " + block.detail : "";
+        return label + detail + path;
+      }
       return prettyJson(block);
     }
 
