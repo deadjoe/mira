@@ -207,6 +207,15 @@
       color: var(--muted);
     }
 
+    .brand-version {
+      margin-top: 4px;
+      font-size: 11px;
+      line-height: 1.2;
+      color: var(--muted);
+      opacity: 0.7;
+      letter-spacing: 0.02em;
+    }
+
     .source-box {
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -542,6 +551,47 @@
       background: color-mix(in srgb, var(--line) 55%, transparent);
       border: 0;
       color: var(--ink);
+    }
+
+    .export-wrap {
+      position: relative;
+    }
+
+    .export-menu {
+      position: absolute;
+      top: calc(100% + 4px);
+      right: 0;
+      z-index: 40;
+      display: none;
+      flex-direction: column;
+      min-width: 168px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: var(--panel);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+      padding: 4px;
+      overflow: hidden;
+    }
+
+    .export-menu.open {
+      display: flex;
+    }
+
+    .export-menu button {
+      border: 0;
+      background: transparent;
+      color: var(--ink);
+      text-align: left;
+      border-radius: 5px;
+      padding: 7px 10px;
+      min-height: 30px;
+      white-space: nowrap;
+    }
+
+    .export-menu button:hover {
+      background: var(--panel-soft);
+      border: 0;
+      color: var(--teal);
     }
 
     .filters {
@@ -1083,6 +1133,7 @@
             <span>Codex CLI</span>
             <span>Session Viewer</span>
           </div>
+          <div class="brand-version" id="brandVersion"></div>
         </div>
       </div>
 
@@ -1126,7 +1177,14 @@
             <button class="search-clear" id="searchClearButton" type="button" aria-label="Clear search" title="Clear search">&times;</button>
           </div>
           <button class="icon-button" id="themeButton" type="button" aria-label="Switch theme" title="Switch theme"></button>
-          <button id="downloadVisibleButton" type="button">Download Visible JSONL</button>
+          <div class="export-wrap" id="exportWrap">
+            <button id="exportButton" type="button" disabled title="Export the visible records to a readable document">Export &#9662;</button>
+            <div class="export-menu" id="exportMenu" role="menu" aria-hidden="true">
+              <button type="button" role="menuitem" data-export="markdown">Markdown (.md)</button>
+              <button type="button" role="menuitem" data-export="pdf">PDF (.pdf)</button>
+              <button type="button" role="menuitem" data-export="json">JSON (.json)</button>
+            </div>
+          </div>
         </div>
         <div class="filters">
           <label class="check"><input id="showUser" type="checkbox" checked> User</label>
@@ -1162,10 +1220,12 @@
   </div>
 
   <script type="module">
-    import { open } from '@tauri-apps/plugin-dialog';
+    import { open, save } from '@tauri-apps/plugin-dialog';
     import { invoke } from '@tauri-apps/api/core';
     import { Store } from '@tauri-apps/plugin-store';
+    import { jsPDF } from 'jspdf';
     import logoUrl from './src/assets/mira-logo.png';
+    import notoFontUrl from './src/assets/NotoSansSC-Regular.ttf';
 
     "use strict";
 
@@ -1191,11 +1251,14 @@
       chooseButton: document.getElementById("chooseButton"),
       reloadLastButton: document.getElementById("reloadLastButton"),
       brandLogo: document.getElementById("brandLogo"),
+      brandVersion: document.getElementById("brandVersion"),
       searchWrap: document.getElementById("searchWrap"),
       searchInput: document.getElementById("searchInput"),
       searchClearButton: document.getElementById("searchClearButton"),
       themeButton: document.getElementById("themeButton"),
-      downloadVisibleButton: document.getElementById("downloadVisibleButton"),
+      exportButton: document.getElementById("exportButton"),
+      exportWrap: document.getElementById("exportWrap"),
+      exportMenu: document.getElementById("exportMenu"),
       showUser: document.getElementById("showUser"),
       showAssistant: document.getElementById("showAssistant"),
       showTools: document.getElementById("showTools"),
@@ -2248,6 +2311,7 @@
         : "Loaded " + state.events.length + " " + fmtLabel + " records from " + state.sourceName + ".";
       updatePinToggleState();
       renderPins();
+      setExportEnabled();
     }
 
     async function loadUrl(src) {
@@ -3025,17 +3089,262 @@
       flash(button, "Copied");
     }
 
-    function downloadVisibleJsonl() {
-      const text = state.visible.map((event) => event.raw).join("\n") + "\n";
-      const blob = new Blob([text], { type: "application/x-ndjson;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = (state.format === "codex" ? "codex-session-visible.jsonl" : "claude-session-visible.jsonl");
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+    function kindLabel(kind) {
+      switch (kind) {
+        case "user": return "User";
+        case "assistant": return "Assistant";
+        case "tool-call": return "Tool Call";
+        case "tool-result": return "Tool Result";
+        case "attachment": return "Attachment";
+        case "system": return "System";
+        default: return "Meta";
+      }
+    }
+
+    function baseExportName() {
+      const name = state.sourceName || "session";
+      const dot = name.lastIndexOf(".");
+      return dot > 0 ? name.slice(0, dot) : name;
+    }
+
+    function exportMetaLine(event) {
+      const record = event.record;
+      const parts = [record.type || "unknown"];
+      if (record.subtype) parts.push(record.subtype);
+      const id = event.format === "codex" ? (event.codexTurnId || "") : (record.uuid || "");
+      if (id) parts.push("id " + shortId(id));
+      if (event.turnId) parts.push("turn " + event.turnId);
+      if (record.timestamp) parts.push(formatTime(record.timestamp));
+      return parts.join("  ·  ");
+    }
+
+    function blockToMarkdown(block) {
+      if (!block) return "";
+      if (typeof block === "string") return block;
+      if (block.type === "text") return block.text || "";
+      if (block.type === "thinking") {
+        const text = (block.thinking || block.text || "").trim();
+        if (!text) return "";
+        return "> **Thinking**\n> " + text.split(/\r?\n/).join("\n> ");
+      }
+      if (block.type === "tool_use") {
+        const name = block.name || "tool";
+        const json = prettyJson(block.input || {});
+        return "**Tool: " + name + "**\n```json\n" + json + "\n```";
+      }
+      if (block.type === "tool_result") {
+        const content = blockContentText(block);
+        return "**Tool Result**\n```text\n" + content + "\n```";
+      }
+      if (block.type === "image") {
+        const label = block.name || "Image";
+        const url = block.image_url || "";
+        return url ? "![" + label + "](" + url + ")" : "_[" + label + "]_";
+      }
+      return blockContentText(block);
+    }
+
+    function eventToMarkdown(event) {
+      const head = "## [Line " + event.lineNumber + "] " + kindLabel(event.kind);
+      const meta = "*" + exportMetaLine(event) + "*";
+      const blocks = event.blocks || [];
+      const body = blocks.length
+        ? blocks.map(blockToMarkdown).filter(Boolean).join("\n\n")
+        : eventContentText(event);
+      return head + "\n" + meta + "\n\n" + (body || "_(empty)_") + "\n";
+    }
+
+    function buildMarkdown() {
+      const fmt = state.format === "codex" ? "Codex CLI" : "Claude Code";
+      const lines = [];
+      lines.push("# " + (state.sourceName || "session"));
+      lines.push("");
+      lines.push("> " + fmt + " session  ·  " + state.visible.length + " visible records  ·  exported " + new Date().toLocaleString());
+      lines.push("");
+      lines.push("---");
+      lines.push("");
+      for (const event of state.visible) {
+        lines.push(eventToMarkdown(event));
+        lines.push("---");
+        lines.push("");
+      }
+      return lines.join("\n");
+    }
+
+    function buildJson() {
+      const fmt = state.format === "codex" ? "Codex CLI" : "Claude Code";
+      const payload = {
+        source: state.sourceName || "session",
+        format: fmt,
+        exportedAt: new Date().toISOString(),
+        visibleCount: state.visible.length,
+        records: state.visible.map((event) => {
+          const record = event.record;
+          const id = event.format === "codex" ? (event.codexTurnId || "") : (record.uuid || "");
+          return {
+            line: event.lineNumber,
+            role: event.kind,
+            type: record.type || "unknown",
+            subtype: record.subtype || null,
+            timestamp: record.timestamp || null,
+            id: id || null,
+            turn: event.turnId || null,
+            content: eventContentText(event),
+            raw: record
+          };
+        })
+      };
+      return JSON.stringify(payload, null, 2);
+    }
+
+    function bytesToBase64(bytes) {
+      let binary = "";
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      return btoa(binary);
+    }
+
+    let cachedFontBase64 = null;
+
+    async function loadNotoFontBase64() {
+      if (cachedFontBase64) return cachedFontBase64;
+      const response = await fetch(notoFontUrl);
+      const buffer = await response.arrayBuffer();
+      cachedFontBase64 = bytesToBase64(new Uint8Array(buffer));
+      return cachedFontBase64;
+    }
+
+    async function buildPdfBase64() {
+      const fontBase64 = await loadNotoFontBase64();
+      const FONT_NAME = "NotoSansSC";
+      const doc = new jsPDF({ unit: "pt", format: "letter" });
+      doc.addFileToVFS(FONT_NAME + ".ttf", fontBase64);
+      doc.addFont(FONT_NAME + ".ttf", FONT_NAME, "normal");
+      doc.addFont(FONT_NAME + ".ttf", FONT_NAME, "bold");
+      doc.addFont(FONT_NAME + ".ttf", FONT_NAME, "italic");
+      doc.setFont(FONT_NAME, "normal");
+
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 50;
+      const maxWidth = pageW - margin * 2;
+      let y = margin;
+
+      const fmt = state.format === "codex" ? "Codex CLI" : "Claude Code";
+      doc.setFont(FONT_NAME, "bold");
+      doc.setFontSize(16);
+      const titleLines = doc.splitTextToSize(state.sourceName || "session", maxWidth);
+      for (const line of titleLines) {
+        if (y > pageH - margin) { doc.addPage(); y = margin; }
+        doc.text(line, margin, y);
+        y += 20;
+      }
+      y += 4;
+      doc.setFont(FONT_NAME, "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(110, 100, 90);
+      const sub = fmt + "  ·  " + state.visible.length + " records  ·  exported " + new Date().toLocaleString();
+      if (y > pageH - margin) { doc.addPage(); y = margin; }
+      doc.text(sub, margin, y);
+      y += 16;
+      doc.setDrawColor(200, 190, 178);
+      doc.line(margin, y, pageW - margin, y);
+      y += 18;
+      doc.setTextColor(0, 0, 0);
+
+      for (const event of state.visible) {
+        const head = "[Line " + event.lineNumber + "] " + kindLabel(event.kind);
+        doc.setFont(FONT_NAME, "bold");
+        doc.setFontSize(11);
+        if (y > pageH - margin - 20) { doc.addPage(); y = margin; }
+        doc.text(head, margin, y);
+        y += 14;
+        doc.setFont(FONT_NAME, "italic");
+        doc.setFontSize(8);
+        doc.setTextColor(120, 110, 100);
+        const metaLines = doc.splitTextToSize(exportMetaLine(event), maxWidth);
+        for (const line of metaLines) {
+          if (y > pageH - margin) { doc.addPage(); y = margin; }
+          doc.text(line, margin, y);
+          y += 10;
+        }
+        y += 4;
+        doc.setTextColor(0, 0, 0);
+
+        const content = eventContentText(event);
+        if (content) {
+          doc.setFont(FONT_NAME, "normal");
+          doc.setFontSize(9);
+          const bodyLines = doc.splitTextToSize(content, maxWidth);
+          for (const line of bodyLines) {
+            if (y > pageH - margin) { doc.addPage(); y = margin; }
+            doc.text(line, margin, y);
+            y += 11;
+          }
+        }
+        y += 12;
+      }
+
+      const arrayBuffer = doc.output("arraybuffer");
+      return bytesToBase64(new Uint8Array(arrayBuffer));
+    }
+
+    const EXPORT_FORMATS = {
+      markdown: { ext: "md", filter: { name: "Markdown", extensions: ["md"] }, encoding: "utf8" },
+      pdf: { ext: "pdf", filter: { name: "PDF", extensions: ["pdf"] }, encoding: "base64" },
+      json: { ext: "json", filter: { name: "JSON", extensions: ["json"] }, encoding: "utf8" }
+    };
+
+    async function exportAs(format) {
+      const conf = EXPORT_FORMATS[format];
+      if (!conf) return;
+      if (!state.visible.length) {
+        el.statusLine.textContent = "Nothing to export. Open a session file first.";
+        return;
+      }
+      const defaultName = baseExportName() + "." + conf.ext;
+      if (format === "pdf") el.statusLine.textContent = "Preparing PDF (loading font)...";
+      let content;
+      try {
+        if (format === "markdown") content = buildMarkdown();
+        else if (format === "json") content = buildJson();
+        else content = await buildPdfBase64();
+      } catch (error) {
+        el.statusLine.textContent = "Export build failed: " + error.message;
+        return;
+      }
+      let path;
+      try {
+        path = await save({
+          defaultPath: defaultName,
+          filters: [conf.filter]
+        });
+      } catch (error) {
+        el.statusLine.textContent = "Save dialog failed: " + error.message;
+        return;
+      }
+      if (!path) return;
+      try {
+        await invoke("write_export_file", { path, content, encoding: conf.encoding });
+        el.statusLine.textContent = "Exported " + state.visible.length + " records to " + path;
+      } catch (error) {
+        el.statusLine.textContent = "Export write failed: " + error.message;
+      }
+    }
+
+    function setExportEnabled() {
+      el.exportButton.disabled = !state.events.length;
+      el.exportButton.title = state.events.length
+        ? "Export the visible records to a readable document"
+        : "Open a session file first to enable export";
+    }
+
+    function toggleExportMenu(open) {
+      const willOpen = open == null ? !el.exportMenu.classList.contains("open") : open;
+      el.exportMenu.classList.toggle("open", willOpen);
+      el.exportMenu.setAttribute("aria-hidden", willOpen ? "false" : "true");
     }
 
     function flash(button, text) {
@@ -3094,7 +3403,30 @@
       setTheme(currentTheme() === "dark" ? "light" : "dark");
     });
 
-    el.downloadVisibleButton.addEventListener("click", downloadVisibleJsonl);
+    el.exportButton.addEventListener("click", (event) => {
+      if (el.exportButton.disabled) return;
+      event.stopPropagation();
+      toggleExportMenu();
+    });
+
+    el.exportMenu.addEventListener("click", (event) => {
+      const item = event.target.closest("[data-export]");
+      if (!item) return;
+      event.stopPropagation();
+      toggleExportMenu(false);
+      const fmt = item.dataset.export;
+      exportAs(fmt).catch((error) => {
+        el.statusLine.textContent = "Export failed: " + error.message;
+      });
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!el.exportWrap.contains(event.target)) toggleExportMenu(false);
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") toggleExportMenu(false);
+    });
 
     el.pinToggleButton.addEventListener("click", () => {
       if (!state.currentPath) return;
@@ -3174,11 +3506,18 @@
 
     setTheme(currentTheme(), false);
     updateSearchClear();
+    setExportEnabled();
 
     if (el.brandLogo && logoUrl) {
       el.brandLogo.style.webkitMaskImage = "url('" + logoUrl + "')";
       el.brandLogo.style.maskImage = "url('" + logoUrl + "')";
     }
+
+    invoke("get_app_version").then((version) => {
+      if (el.brandVersion && version) el.brandVersion.textContent = "v" + version;
+    }).catch(() => {
+      // Non-critical if version cannot be read.
+    });
 
     loadPins().then(() => {
       updatePinToggleState();

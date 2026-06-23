@@ -4,7 +4,7 @@
 
 <h1 align="center">Mira</h1>
 
-<p align="center">Claude Code · Codex CLI JSONL Viewer</p>
+<p align="center">Claude Code · Codex CLI Session Viewer</p>
 
 ---
 
@@ -28,7 +28,8 @@ The app auto-detects the format when you open a file — no manual switching nee
 - **Patch apply rendering** — Codex CLI `patch_apply_end` events show changed files and unified diffs
 - **Commentary filtering** — Codex CLI streaming commentary fragments are hidden by default; only final answers are rendered, keeping markdown intact
 - **Copy card content** — one-click copy of any event's text content to clipboard
-- **Download filtered JSONL** — export the currently visible subset as a new `.jsonl` file
+- **Export** — export the currently visible subset as a human-readable **Markdown**, **PDF**, or **JSON** document via a native save dialog (PDF embeds a CJK-capable font for full Unicode support)
+- **Image rendering** — base64-encoded inline images (PNG/JPEG/GIF/WebP) stored in session JSONL are decoded and rendered in place
 - **Window state persistence** — remembers window size and position across launches
 - **Responsive layout** — works on desktop and mobile
 
@@ -45,6 +46,17 @@ npx tauri build
 ```
 
 The `.app` and `.dmg` will be under `tauri-app/src-tauri/target/release/bundle/`.
+
+### Releasing a new version
+
+Use the `release` script to auto-increment the patch version (syncs `tauri.conf.json`, `Cargo.toml`, and `package.json`) and build in one step:
+
+```bash
+cd tauri-app
+npm run release
+```
+
+The version is read at runtime from `tauri.conf.json` and shown under the sidebar branding. To bump the version without building, run `npm run bump`.
 
 ### Usage
 

@@ -1,18 +1,22 @@
 {
   "name": "mira",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "bump": "node bump-version.mjs",
+    "release": "node bump-version.mjs && tauri build"
   },
   "dependencies": {
+    "@fontsource/noto-sans-sc": "^5.2.9",
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-dialog": "^2.2.0",
     "@tauri-apps/plugin-fs": "^2.2.0",
-    "@tauri-apps/plugin-store": "^2.2.0"
+    "@tauri-apps/plugin-store": "^2.2.0",
+    "jspdf": "^2.5.2"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.2",
