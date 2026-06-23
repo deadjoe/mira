@@ -2,8 +2,6 @@
   <img src="mira_logo.png" width="160" alt="Mira" />
 </p>
 
-<h1 align="center">Mira</h1>
-
 <p align="center">Claude Code · Codex CLI Session Viewer</p>
 
 ---
