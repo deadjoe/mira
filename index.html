@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="bright">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mira — Claude Code · Codex CLI Session Viewer</title>
+<meta name="description" content="Mira is a macOS app for browsing and searching session JSONL transcripts from Claude Code and Codex CLI." />
+<meta name="color-scheme" content="light dark" />
+<link id="favicon" rel="icon" href="assets/mira-mark.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  /*
+    Bearbone Design System v0.2
+    Bright default · Dark available
+    Latin: Berkeley Mono (local) → JetBrains Mono (web)
+  */
+  @font-face {
+    font-family: "Berkeley Mono";
+    src: local("Berkeley Mono"), local("Berkeley Mono Regular"), local("BerkeleyMono-Regular");
+    font-weight: 400; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: "Berkeley Mono";
+    src: local("Berkeley Mono Medium"), local("BerkeleyMono-Medium");
+    font-weight: 500; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: "Berkeley Mono";
+    src: local("Berkeley Mono Bold"), local("BerkeleyMono-Bold");
+    font-weight: 600; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: "Sarasa Mono SC";
+    src: local("Sarasa Mono SC");
+    font-weight: 400; font-style: normal; font-display: swap;
+  }
+
+  html[data-theme="dark"] {
+    --bg: #000000;
+    --bg-panel: #000000;
+    --fg: #ffffff;
+    --fg2: #b0b0b0;
+    --fg3: #6e6e6e;
+    --stroke: #9a9a9a;
+    --stroke-soft: #3a3a3a;
+    --header-bg: rgba(0, 0, 0, 0.92);
+    --code-bg: #050505;
+    --btn-primary-bg: #ffffff;
+    --btn-primary-fg: #000000;
+    --selection-bg: #ffffff;
+    --selection-fg: #000000;
+  }
+  html[data-theme="bright"] {
+    --bg: #f1ece2;
+    --bg-panel: #f7f3eb;
+    --fg: #16140f;
+    --fg2: #4a463f;
+    --fg3: #7a746a;
+    --stroke: #7e7462;
+    --stroke-soft: #c4bba8;
+    --header-bg: rgba(241, 236, 226, 0.94);
+    --code-bg: #ebe5d8;
+    --btn-primary-bg: #16140f;
+    --btn-primary-fg: #f1ece2;
+    --selection-bg: #16140f;
+    --selection-fg: #f1ece2;
+  }
+
+  :root {
+    --maxw: 1080px;
+    --mono: "Berkeley Mono", "Sarasa Mono SC", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --radius: 10px;
+    --stroke-w: 1px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: 15px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    transition: background-color .2s ease, color .2s ease;
+  }
+  a { color: inherit; text-decoration: none; }
+  ::selection { background: var(--selection-bg); color: var(--selection-fg); }
+  .wrap { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 0 28px; }
+
+  header {
+    position: sticky; top: 0; z-index: 20;
+    background: var(--header-bg);
+    border-bottom: var(--stroke-w) solid var(--stroke-soft);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  .nav {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 64px; gap: 16px;
+  }
+  .brand {
+    display: inline-flex; align-items: center; gap: 12px;
+    font-weight: 600; font-size: 14px; letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+  .brand-mark { width: 22px; height: 22px; display: block; color: var(--fg); }
+  .nav-links { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; justify-content: flex-end; }
+  .nav-links a.nav-text {
+    color: var(--fg2); font-size: 12px; font-weight: 500;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    transition: color .15s;
+  }
+  .nav-links a.nav-text:hover { color: var(--fg); }
+
+  .gh, .theme-toggle {
+    display: inline-flex; align-items: center; gap: 8px;
+    border: var(--stroke-w) solid var(--stroke-soft);
+    padding: 8px 14px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--fg);
+    background: transparent; font-family: var(--mono); cursor: pointer;
+    transition: border-color .15s;
+  }
+  .gh:hover, .theme-toggle:hover { border-color: var(--stroke); }
+  .gh svg, .theme-toggle svg { width: 14px; height: 14px; flex: none; }
+  .theme-toggle .label-dark { display: none; }
+  html[data-theme="dark"] .theme-toggle .label-bright { display: none; }
+  html[data-theme="dark"] .theme-toggle .label-dark { display: inline; }
+
+  .hero {
+    padding: 88px 0 72px;
+    border-bottom: var(--stroke-w) solid var(--stroke-soft);
+  }
+  .hero-inner { max-width: 720px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 10px;
+    border: var(--stroke-w) solid var(--stroke-soft);
+    color: var(--fg2); font-size: 11px; font-weight: 500;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    padding: 8px 14px; border-radius: 999px; margin-bottom: 28px;
+  }
+  .badge .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--fg); flex: none;
+  }
+  h1 {
+    font-size: clamp(28px, 4.2vw, 40px);
+    font-weight: 600; line-height: 1.2;
+    letter-spacing: 0.04em; text-transform: uppercase;
+    margin: 0 0 22px;
+  }
+  h1 em {
+    font-style: normal; color: var(--fg2);
+    border-bottom: var(--stroke-w) solid var(--stroke);
+  }
+  .lede {
+    font-size: 14px; color: var(--fg2); max-width: 58ch;
+    margin: 0 0 32px; line-height: 1.7; letter-spacing: 0.02em;
+  }
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 20px; border-radius: 999px;
+    font-weight: 600; font-size: 11px; letter-spacing: 0.14em;
+    text-transform: uppercase; border: var(--stroke-w) solid transparent;
+    transition: opacity .15s, border-color .15s; cursor: pointer; font-family: var(--mono);
+  }
+  .btn-primary {
+    background: var(--btn-primary-bg); color: var(--btn-primary-fg);
+    border-color: var(--btn-primary-bg);
+  }
+  .btn-primary:hover { opacity: 0.88; }
+  .btn-ghost {
+    background: transparent; border-color: var(--stroke-soft); color: var(--fg);
+  }
+  .btn-ghost:hover { border-color: var(--stroke); }
+  .req {
+    font-size: 11px; color: var(--fg3);
+    letter-spacing: 0.1em; text-transform: uppercase;
+  }
+  .req b { color: var(--fg2); font-weight: 600; }
+
+  section { padding: 72px 0; border-bottom: var(--stroke-w) solid var(--stroke-soft); }
+  .section-head { max-width: 62ch; margin: 0 0 40px; }
+  .eyebrow {
+    text-transform: uppercase; letter-spacing: 0.16em;
+    font-size: 11px; font-weight: 600; color: var(--fg3); margin-bottom: 12px;
+  }
+  h2 {
+    font-size: clamp(20px, 2.8vw, 26px); font-weight: 600;
+    letter-spacing: 0.08em; line-height: 1.25;
+    text-transform: uppercase; margin: 0 0 12px;
+  }
+  .section-head p {
+    color: var(--fg2); margin: 0; font-size: 13px; line-height: 1.7;
+  }
+
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .card {
+    border: var(--stroke-w) solid var(--stroke-soft);
+    border-radius: var(--radius);
+    padding: 24px 22px;
+    background: var(--bg-panel);
+    transition: border-color .15s;
+  }
+  .card:hover { border-color: var(--stroke); }
+  .ico {
+    width: 40px; height: 40px; border-radius: 8px;
+    display: grid; place-items: center;
+    border: var(--stroke-w) solid var(--stroke-soft);
+    margin-bottom: 18px;
+  }
+  .ico svg {
+    width: 18px; height: 18px;
+    stroke: var(--fg); fill: none;
+    stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
+  }
+  .card h3 {
+    font-weight: 600; margin: 0 0 8px; font-size: 13px;
+    letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .card p {
+    margin: 0; color: var(--fg2); font-size: 13px; line-height: 1.65;
+  }
+
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .step {
+    border: var(--stroke-w) solid var(--stroke-soft);
+    border-radius: var(--radius);
+    padding: 22px;
+    background: var(--bg-panel);
+  }
+  .step-n {
+    width: 28px; height: 28px; border-radius: 999px;
+    border: var(--stroke-w) solid var(--stroke);
+    color: var(--fg); display: grid; place-items: center;
+    font-size: 12px; font-weight: 600; margin-bottom: 16px;
+  }
+  .step h3 {
+    font-weight: 600; margin: 0 0 8px; font-size: 12px;
+    letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .step p { margin: 0; color: var(--fg2); font-size: 12.5px; line-height: 1.6; }
+
+  .codebox {
+    margin-top: 16px;
+    border: var(--stroke-w) solid var(--stroke-soft);
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: var(--code-bg);
+  }
+  .codebox code {
+    color: var(--fg2); font-family: var(--mono);
+    font-size: 11.5px; line-height: 1.55; white-space: pre-wrap;
+  }
+
+  .tip {
+    margin-top: 28px; color: var(--fg2); font-size: 13px;
+    border: var(--stroke-w) solid var(--stroke-soft); border-radius: var(--radius);
+    padding: 18px 22px; line-height: 1.65;
+    background: var(--bg-panel);
+  }
+  .tip b { color: var(--fg); font-weight: 600; }
+
+  .baseline {
+    margin-top: 28px;
+    border: var(--stroke-w) solid var(--stroke-soft);
+    border-radius: 8px;
+    padding: 12px 16px;
+    display: flex; flex-wrap: wrap; gap: 8px 18px;
+    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--fg3); background: var(--bg-panel);
+  }
+  .baseline span b { color: var(--fg2); font-weight: 600; }
+
+  .formats {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  }
+  .format {
+    border: var(--stroke-w) solid var(--stroke-soft);
+    border-radius: var(--radius);
+    padding: 22px;
+    background: var(--bg-panel);
+  }
+  .format h3 {
+    font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;
+    margin: 0 0 10px; font-weight: 600;
+  }
+  .format p, .format li {
+    color: var(--fg2); font-size: 12.5px; line-height: 1.6;
+  }
+  .format ul { margin: 0; padding-left: 1.1em; }
+  .format li { margin-bottom: 4px; }
+  .format code {
+    font-family: var(--mono); font-size: 11px; color: var(--fg);
+  }
+
+  footer { padding: 48px 0 56px; }
+  .foot-top {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 32px; flex-wrap: wrap;
+    padding-bottom: 28px;
+    border-bottom: var(--stroke-w) solid var(--stroke-soft);
+  }
+  .foot-brand {
+    font-weight: 600; font-size: 13px; letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+  .foot-tag {
+    color: var(--fg3); font-size: 12px; margin-top: 10px;
+    max-width: 40ch; line-height: 1.55;
+  }
+  .foot-links { display: flex; gap: 24px; flex-wrap: wrap; }
+  .foot-links a {
+    color: var(--fg2); font-size: 11px; font-weight: 500;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    transition: color .15s;
+  }
+  .foot-links a:hover { color: var(--fg); }
+  .legal {
+    margin-top: 24px; color: var(--fg3); font-size: 11px; line-height: 1.75;
+  }
+
+  @media (max-width: 820px) {
+    .grid, .steps, .formats { grid-template-columns: 1fr; }
+    .nav-links a.nav-text { display: none; }
+    .hero { padding: 64px 0 56px; }
+    section { padding: 56px 0; }
+  }
+</style>
+<script>
+  (function () {
+    try {
+      var t = localStorage.getItem("mira-theme");
+      if (t === "bright" || t === "dark") {
+        document.documentElement.setAttribute("data-theme", t);
+      } else {
+        document.documentElement.setAttribute("data-theme", "bright");
+      }
+    } catch (e) {
+      document.documentElement.setAttribute("data-theme", "bright");
+    }
+  })();
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="#top">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+        <rect x="2" y="2" width="20" height="20" rx="2" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M7 16V8l5 5 5-5v8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Mira
+    </a>
+    <nav class="nav-links">
+      <a class="nav-text" href="#features">Features</a>
+      <a class="nav-text" href="#build">Build</a>
+      <a class="nav-text" href="#formats">Formats</a>
+      <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle color theme">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+          <circle cx="8" cy="8" r="3.2"/>
+          <path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1"/>
+        </svg>
+        <span class="label-bright">Dark</span>
+        <span class="label-dark">Bright</span>
+      </button>
+      <a class="gh" href="https://github.com/deadjoe/mira" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <section class="hero">
+    <div class="wrap">
+      <div class="hero-inner">
+        <div class="badge"><span class="dot"></span> Claude Code · Codex CLI Session Viewer</div>
+        <h1>Browse agent sessions without drowning in <em>JSONL</em></h1>
+        <p class="lede">Mira is a macOS app for browsing and searching session transcripts from AI coding agents. Open a Claude Code or Codex CLI JSONL file — format is auto-detected, no manual switching.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#build">Build from source</a>
+          <a class="btn btn-ghost" href="https://github.com/deadjoe/mira" target="_blank" rel="noopener">View on GitHub</a>
+        </div>
+        <p class="req"><b>macOS</b> · <b>Tauri v2</b> · supports <b>Claude Code</b> &amp; <b>Codex CLI</b></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">01 · Features</div>
+        <h2>What Mira gives you</h2>
+        <p>Built for reading long agent transcripts the way you actually work — search, filter roles, jump turns, export what you need.</p>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h8M8 9h2"/></svg></div>
+          <h3>Auto format detection</h3>
+          <p>Opens Claude Code and Codex CLI session files. Identifies the format automatically and renders accordingly.</p>
+        </div>
+        <div class="card">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>
+          <h3>Search &amp; role filters</h3>
+          <p>Full-text search across fields with highlights. Toggle User, Assistant, tool calls/results, attachments, metadata, thinking.</p>
+        </div>
+        <div class="card">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h14"/></svg></div>
+          <h3>Turn navigation</h3>
+          <p>Auto-detected conversation turns with a collapsible sidebar outline so you can jump without endless scrolling.</p>
+        </div>
+        <div class="card">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l3-4 3 3 4-6"/></svg></div>
+          <h3>Token usage stats</h3>
+          <p>Claude Code: deduplicated by requestId. Codex CLI: summed from token_count reports.</p>
+        </div>
+        <div class="card">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg></div>
+          <h3>Markdown &amp; tools</h3>
+          <p>Headings, tables, code, images. Tool cards with expandable JSON. Codex patches show files and unified diffs.</p>
+        </div>
+        <div class="card">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg></div>
+          <h3>Export</h3>
+          <p>Export the visible subset as Markdown, PDF, or JSON via a native save dialog. PDF embeds a CJK-capable font.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="build">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">02 · macOS app</div>
+        <h2>Build from source</h2>
+        <p>Native Tauri v2 app with native file dialogs, persistent file memory, and window state restoration.</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-n">1</div>
+          <h3>Install &amp; build</h3>
+          <p>From the repo root:</p>
+          <div class="codebox"><code>cd tauri-app
+npm install
+npx tauri build</code></div>
+        </div>
+        <div class="step">
+          <div class="step-n">2</div>
+          <h3>Release (optional)</h3>
+          <p>Bump patch version and build in one step:</p>
+          <div class="codebox"><code>cd tauri-app
+npm run release</code></div>
+        </div>
+        <div class="step">
+          <div class="step-n">3</div>
+          <h3>Open a session</h3>
+          <p>Click <b>Select JSONL</b>. Pick a file under <code>~/.claude/projects/</code> or <code>~/.codex/sessions/</code> (use Cmd+Shift+. for hidden dirs).</p>
+        </div>
+      </div>
+      <p class="tip"><b>Sharing:</b> send the <code>.dmg</code>. On first launch, right-click the app → <b>Open</b> to bypass Gatekeeper. Ad-hoc signed — no Apple Developer Program required.</p>
+      <div class="baseline">
+        <span><b>Project</b> · mira</span>
+        <span><b>Stack</b> · Tauri v2</span>
+        <span><b>Design</b> · Bearbone DS v0.2</span>
+        <span><b>Default theme</b> · bright</span>
+        <span><b>Toggle</b> · dark / bright</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="formats">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">03 · Supported formats</div>
+        <h2>Session sources</h2>
+        <p>Two JSONL dialects, one viewer.</p>
+      </div>
+      <div class="formats">
+        <div class="format">
+          <h3>Claude Code</h3>
+          <p>Files under <code>~/.claude/projects/&lt;project&gt;/&lt;uuid&gt;.jsonl</code>.</p>
+          <ul>
+            <li>Top-level <code>message</code> + <code>uuid</code></li>
+            <li>Types: user, assistant, system, attachment, ai-title, metadata…</li>
+          </ul>
+        </div>
+        <div class="format">
+          <h3>Codex CLI</h3>
+          <p>Rollouts under <code>~/.codex/sessions/YYYY/MM/DD/rollout-…jsonl</code>.</p>
+          <ul>
+            <li>Top-level <code>payload</code></li>
+            <li>session_meta, response_item, event_msg, token_count, patch_apply_end…</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-top">
+      <div>
+        <div class="foot-brand">Mira</div>
+        <p class="foot-tag">Claude Code · Codex CLI session viewer for macOS.</p>
+      </div>
+      <nav class="foot-links">
+        <a href="https://github.com/deadjoe/mira" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/deadjoe/mira/blob/main/README.md" target="_blank" rel="noopener">Readme</a>
+        <a href="https://github.com/deadjoe/mira/tree/main/tauri-app" target="_blank" rel="noopener">App source</a>
+      </nav>
+    </div>
+    <p class="legal">
+      Mira is an independent open-source project. Claude and Codex are trademarks of their respective owners.
+    </p>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var btn = document.getElementById("themeToggle");
+    var fav = document.getElementById("favicon");
+
+    function applyTheme(theme) {
+      if (theme !== "bright" && theme !== "dark") theme = "bright";
+      root.setAttribute("data-theme", theme);
+      try { localStorage.setItem("mira-theme", theme); } catch (e) {}
+      if (fav) {
+        fav.setAttribute("href", theme === "bright" ? "assets/mira-mark.svg" : "assets/mira-mark-white.svg");
+      }
+      if (btn) {
+        btn.setAttribute("aria-label", theme === "bright" ? "Switch to dark theme" : "Switch to bright theme");
+      }
+    }
+
+    applyTheme(root.getAttribute("data-theme") || "bright");
+
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var cur = root.getAttribute("data-theme") === "dark" ? "dark" : "bright";
+        applyTheme(cur === "bright" ? "dark" : "bright");
+      });
+    }
+  })();
+</script>
+
+</body>
+</html>
